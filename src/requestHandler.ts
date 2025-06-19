@@ -521,7 +521,7 @@ export default class RequestHandler {
       }
     }
     
-    if (!["heading", "block", "frontmatter"].includes(targetType)) {
+    if (!["heading", "block", "frontmatter", "file"].includes(targetType)) {
       this.returnCannedResponse(res, {
         errorCode: ErrorCode.InvalidTargetTypeHeader,
       });
@@ -699,20 +699,38 @@ export default class RequestHandler {
       return;
     }
 
-    // For PATCH operations, the new filename should be in the request body
-    const newFilename = typeof req.body === 'string' ? req.body.trim() : '';
+    const target = req.get("Target");
+    const isMove = target === "path";
+    const isRename = target === "name";
     
-    if (!newFilename) {
+    if (!isMove && !isRename) {
       res.status(400).json({
-        errorCode: 40001,
-        message: "New filename is required in request body"
+        errorCode: 40003,
+        message: "Invalid Target value for file operations. Use 'name' for rename or 'path' for move"
       });
       return;
     }
 
-    // Construct the new path by replacing just the filename
-    const dirPath = path.substring(0, path.lastIndexOf('/'));
-    const newPath = dirPath ? `${dirPath}/${newFilename}` : newFilename;
+    // For PATCH operations, the new filename/path should be in the request body
+    const newValue = typeof req.body === 'string' ? req.body.trim() : '';
+    
+    if (!newValue) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: isMove ? "New path is required in request body" : "New filename is required in request body"
+      });
+      return;
+    }
+
+    let newPath: string;
+    if (isRename) {
+      // For rename, construct the new path by replacing just the filename
+      const dirPath = path.substring(0, path.lastIndexOf('/'));
+      newPath = dirPath ? `${dirPath}/${newValue}` : newValue;
+    } else {
+      // For move, use the provided path directly
+      newPath = newValue;
+    }
 
     // Validate new path
     if (newPath.endsWith("/")) {
@@ -740,20 +758,32 @@ export default class RequestHandler {
       return;
     }
 
+    // Create parent directories if needed (for move operations)
+    if (isMove) {
+      const parentDir = newPath.substring(0, newPath.lastIndexOf('/'));
+      if (parentDir) {
+        try {
+          await this.app.vault.createFolder(parentDir);
+        } catch {
+          // Folder might already exist, continue
+        }
+      }
+    }
+
     try {
-      // Use FileManager to rename the file (preserves history and updates links)
+      // Use FileManager to rename/move the file (preserves history and updates links)
       // @ts-ignore - fileManager exists at runtime but not in type definitions
       await this.app.fileManager.renameFile(sourceFile, newPath);
       
       res.status(200).json({
-        message: "File successfully renamed",
+        message: isMove ? "File successfully moved" : "File successfully renamed",
         oldPath: path,
         newPath: newPath
       });
     } catch (error) {
       res.status(500).json({
         errorCode: 50001,
-        message: `Failed to rename file: ${error.message}`
+        message: `Failed to ${isMove ? 'move' : 'rename'} file: ${error.message}`
       });
     }
   }
