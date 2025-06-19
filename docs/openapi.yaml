@@ -1847,7 +1847,7 @@ paths:
         To rename a file from "old-name.md" to "new-name.md" in the same directory,
         send the following headers:
         
-        - `Operation`: `replace`
+        - `Operation`: `rename`
         - `Target-Type`: `file`
         - `Target`: `name`
         - `Content-Type`: `text/plain`
@@ -1861,7 +1861,7 @@ paths:
         To move a file from "folder1/file.md" to "folder2/subfolder/file.md",
         send the following headers:
         
-        - `Operation`: `replace`
+        - `Operation`: `move`
         - `Target-Type`: `file`
         - `Target`: `path`
         - `Content-Type`: `text/plain`
@@ -1871,7 +1871,7 @@ paths:
         This operation preserves the file's history, metadata, and automatically
         updates all internal links.
       parameters:
-        - description: "Patch operation to perform"
+        - description: "Patch operation to perform. For file operations, use 'rename' or 'move'"
           in: "header"
           name: "Operation"
           required: true
@@ -1880,6 +1880,8 @@ paths:
               - "append"
               - "prepend"
               - "replace"
+              - "rename"
+              - "move"
             type: "string"
         - description: "Type of target to patch"
           in: "header"
