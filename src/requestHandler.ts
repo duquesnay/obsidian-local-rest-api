@@ -514,11 +514,39 @@ export default class RequestHandler {
       return;
     }
     
-    // Check for file-level operations (like rename) BEFORE validation
-    if (targetType === "file" && operation === "replace") {
-      if (rawTarget === "name" || rawTarget === "path") {
+    // Check for file-level operations BEFORE general validation
+    if (targetType === "file") {
+      // Handle semantic file operations
+      if (operation === "rename") {
+        if (rawTarget !== "name") {
+          res.status(400).json({
+            errorCode: 40004,
+            message: "rename operation must use Target: name"
+          });
+          return;
+        }
         return this.handleRenameOperation(path, req, res);
       }
+      
+      if (operation === "move") {
+        if (rawTarget !== "path") {
+          res.status(400).json({
+            errorCode: 40005,
+            message: "move operation must use Target: path"  
+          });
+          return;
+        }
+        return this.handleRenameOperation(path, req, res);
+      }
+    }
+    
+    // Validate that file-specific operations are only used with file target type
+    if ((operation === "rename" || operation === "move") && targetType !== "file") {
+      res.status(400).json({
+        errorCode: 40006,
+        message: `Operation '${operation}' is only valid for Target-Type: file`
+      });
+      return;
     }
     
     if (!["heading", "block", "frontmatter", "file"].includes(targetType)) {
@@ -533,7 +561,7 @@ export default class RequestHandler {
       });
       return;
     }
-    if (!["append", "prepend", "replace"].includes(operation)) {
+    if (!["append", "prepend", "replace", "rename", "move"].includes(operation)) {
       this.returnCannedResponse(res, {
         errorCode: ErrorCode.InvalidOperation,
       });

@@ -217,3 +217,7 @@ jq '.commands[]' /tmp/result.json
 
 This avoids permission prompts and makes commands more maintainable.
 - for one time tasks, simply reuse the same shell script so permissions don't have to be asked again. Only recurrent tasks go to their own shell script
+
+### New Memories
+- When creating `@~/dotfiles/claude/dev.md`, use a workflow that creates minimal entries in markdown lists to keep tracking of potential development references and notes
+- When working with `@~/dotfiles/claude/TDD.md`, develop a strategy for tracking and organizing test-driven development notes and insights
