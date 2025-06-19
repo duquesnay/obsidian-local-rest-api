@@ -33,7 +33,7 @@ new-name.md
 
 ## Move Operation
 
-To move a file to a different location in your vault:
+To move a file to a different location in your vault. This operation can also rename the file during the move.
 
 ### Request
 ```http
@@ -59,9 +59,14 @@ new-folder/subfolder/file.md
 ## Important Distinctions
 
 - **Rename** (`Target: name`): Changes only the filename, file remains in the same directory
-- **Move** (`Target: path`): Changes the complete path, can move file to different directories
+- **Move** (`Target: path`): Changes the complete path, can move file to different directories and optionally rename
 
-These are intentionally separate operations to prevent ambiguity and ensure clear intent.
+The `move` operation is more powerful as it can:
+1. Move a file to a different directory (keeping the same name)
+2. Move a file to a different directory with a new name
+3. "Rename" a file by keeping it in the same directory but changing its name
+
+These are intentionally separate operations to ensure clear intent, with `rename` being a convenience operation for the common case of changing only the filename.
 
 ## Features
 
