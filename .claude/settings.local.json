@@ -9,7 +9,10 @@
       "Bash(./test-rename-patch.sh:*)",
       "Bash(./test-rename-errors.sh:*)",
       "Bash(./cleanup-test-files.sh:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(npm test:*)",
+      "Bash(../../scripts/agent-tests/test-append.sh:*)",
+      "Bash(npm test:*)"
     ],
     "deny": []
   }
