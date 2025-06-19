@@ -2018,6 +2018,73 @@ paths:
         Create a new file in your vault or update the content of an existing one.
       tags:
         - "Vault Files"
+  "/vault/{filename}/rename":
+    post:
+      description: |
+        Rename or move a file within your vault. This preserves the file's history, metadata, and automatically updates all links pointing to this file.
+      parameters:
+        - description: |
+            Path to the file to rename (relative to your vault root).
+          in: "path"
+          name: "filename"
+          required: true
+          schema:
+            format: "path"
+            type: "string"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                newPath:
+                  description: "The new path for the file (relative to vault root)"
+                  type: "string"
+              required:
+                - "newPath"
+              type: "object"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                properties:
+                  message:
+                    type: "string"
+                  oldPath:
+                    type: "string"
+                  newPath:
+                    type: "string"
+                type: "object"
+          description: "File successfully renamed"
+        "400":
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "Invalid request (missing newPath or invalid path)"
+        "404":
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "Source file does not exist"
+        "409":
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "Destination file already exists"
+        "500":
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "Failed to rename file"
+      summary: |
+        Rename or move a file within your vault.
+      tags:
+        - "Vault Files"
   "/vault/{pathToDirectory}/":
     get:
       parameters:
