@@ -161,3 +161,25 @@ curl -k https://127.0.0.1:27124/
 # Get list of commands
 curl -k https://127.0.0.1:27124/commands/
 ```
+
+## Project Learnings
+
+### 2025-01-02 - File Operations Security Implementation
+**Methodological:**
+- Security-first development pattern: Starting with working implementation then systematically adding security layers proved highly effective. Rather than trying to build everything perfectly from the start, we: (1) Got core functionality working, (2) Identified security gaps through code review, (3) Systematically addressed each vulnerability, (4) Added comprehensive tests for each security measure. This approach prevented security from becoming an afterthought while keeping development momentum.
+
+**Technical:**  
+- Validation layering strategy for file operations: Discovered the importance of validation at multiple levels - input validation (filename format, characters), path validation (traversal protection, absolute paths), file system validation (conflicts, permissions), and cross-platform validation (reserved names, length limits). Each layer catches different attack vectors, creating defense in depth that's more robust than any single validation approach.
+
+**Methodological:**
+- Test-driven security validation: Writing security tests first (17 new tests covering attack scenarios) was crucial for confidence. Testing malicious inputs like `../malicious.md`, reserved names like `CON.md`, and edge cases provided concrete validation that security measures actually work, not just theoretical protection.
+
+### 2025-01-02 - Directory Move Operation Implementation
+**Methodological:**
+- Research-driven implementation validation: When the user questioned "isn't there some obsidian api operation capable of doing it?", conducting web research to understand how Obsidian actually handles folder moves internally proved crucial. This research revealed that native `FileManager.renameFile()` with `TFolder` only moves the folder container, not contents, validating our file-by-file approach as the correct solution that mirrors Obsidian's own internal behavior.
+
+**Technical:**
+- File-by-file approach for directory operations: Discovered that robust directory moves in Obsidian require individual `FileManager.renameFile()` calls for each contained file rather than folder-level operations. This ensures proper link preservation throughout the vault, as each file's move operation updates all references to that specific file. Native folder operations (`adapter.rename()`, `FileManager.renameFile()` with `TFolder`) only move containers without handling contents or links.
+
+**Methodological:**
+- Iterative cleanup and testing workflow: The progression from working implementation → research validation → systematic cleanup → comprehensive testing proved highly effective. Rather than trying to optimize prematurely, we: (1) Got functionality working, (2) Validated the approach through research, (3) Systematically removed experimental code, (4) Ensured all tests pass. This kept working code as the foundation while improving quality incrementally.
