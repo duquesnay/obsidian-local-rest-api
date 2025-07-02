@@ -563,7 +563,19 @@ export default class RequestHandler {
       }
     }
     
-    if (!["heading", "block", "frontmatter", "file", "directory"].includes(targetType)) {
+    // Check for tag operations
+    if (targetType === "tag") {
+      if (operation === "add" || operation === "remove") {
+        return this.handleTagOperation(path, req, res);
+      }
+      res.status(400).json({
+        errorCode: 40009,
+        message: "Only 'add' or 'remove' operations are supported for Target-Type: tag"
+      });
+      return;
+    }
+    
+    if (!["heading", "block", "frontmatter", "file", "directory", "tag"].includes(targetType)) {
       this.returnCannedResponse(res, {
         errorCode: ErrorCode.InvalidTargetTypeHeader,
       });
@@ -575,7 +587,7 @@ export default class RequestHandler {
       });
       return;
     }
-    if (!["append", "prepend", "replace", "rename", "move"].includes(operation)) {
+    if (!["append", "prepend", "replace", "rename", "move", "add", "remove"].includes(operation)) {
       this.returnCannedResponse(res, {
         errorCode: ErrorCode.InvalidOperation,
       });
@@ -1130,6 +1142,430 @@ export default class RequestHandler {
       res.status(500).json({
         errorCode: 50001,
         message: `Failed to delete directory: ${error.message}`
+      });
+    }
+  }
+
+  async tagsGet(req: express.Request, res: express.Response): Promise<void> {
+    // Collect all tags from all files in the vault
+    const tagCounts: Record<string, number> = {};
+    const tagFiles: Record<string, string[]> = {};
+    
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      if (!cache) continue;
+      
+      // Get inline tags
+      const inlineTags = (cache.tags ?? []).map(tag => tag.tag.replace(/^#/, ''));
+      
+      // Get frontmatter tags
+      const frontmatterTags = Array.isArray(cache.frontmatter?.tags) 
+        ? cache.frontmatter.tags.map(tag => tag.toString())
+        : [];
+      
+      // Combine and deduplicate tags for this file
+      const allTags = [...new Set([...inlineTags, ...frontmatterTags])];
+      
+      // Count tags and track files
+      for (const tag of allTags) {
+        tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+        if (!tagFiles[tag]) {
+          tagFiles[tag] = [];
+        }
+        tagFiles[tag].push(file.path);
+      }
+    }
+    
+    // Convert to array and sort by count (descending) then name (ascending)
+    const tags = Object.entries(tagCounts)
+      .map(([tag, count]) => ({
+        tag,
+        count,
+        files: tagFiles[tag].length
+      }))
+      .sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        return a.tag.localeCompare(b.tag);
+      });
+    
+    res.json({
+      tags,
+      totalTags: tags.length
+    });
+  }
+
+  async tagGet(req: express.Request, res: express.Response): Promise<void> {
+    const tagName = decodeURIComponent(req.params.tagname);
+    const files: Array<{ path: string; occurrences: number }> = [];
+    
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      if (!cache) continue;
+      
+      let occurrences = 0;
+      
+      // Count inline tag occurrences
+      const inlineTags = cache.tags ?? [];
+      for (const tag of inlineTags) {
+        const cleanTag = tag.tag.replace(/^#/, '');
+        if (cleanTag === tagName || cleanTag.startsWith(tagName + '/')) {
+          occurrences++;
+        }
+      }
+      
+      // Check frontmatter tags
+      if (Array.isArray(cache.frontmatter?.tags)) {
+        for (const tag of cache.frontmatter.tags) {
+          const cleanTag = tag.toString();
+          if (cleanTag === tagName || cleanTag.startsWith(tagName + '/')) {
+            occurrences++;
+          }
+        }
+      }
+      
+      if (occurrences > 0) {
+        files.push({
+          path: file.path,
+          occurrences
+        });
+      }
+    }
+    
+    if (files.length === 0) {
+      this.returnCannedResponse(res, { statusCode: 404 });
+      return;
+    }
+    
+    // Sort by occurrences (descending) then path (ascending)
+    files.sort((a, b) => {
+      if (b.occurrences !== a.occurrences) return b.occurrences - a.occurrences;
+      return a.path.localeCompare(b.path);
+    });
+    
+    res.json({
+      tag: tagName,
+      files,
+      totalFiles: files.length,
+      totalOccurrences: files.reduce((sum, f) => sum + f.occurrences, 0)
+    });
+  }
+
+  async handleTagOperation(
+    path: string,
+    req: express.Request,
+    res: express.Response
+  ): Promise<void> {
+    const operation = req.get("Operation");
+    const tagName = req.get("Target");
+    
+    if (!tagName) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "Target header with tag name is required"
+      });
+      return;
+    }
+    
+    // Validate tag name
+    if (!/^[a-zA-Z0-9_\-\/]+$/.test(tagName)) {
+      res.status(400).json({
+        errorCode: 40008,
+        message: "Invalid tag name. Tags can only contain letters, numbers, underscores, hyphens, and forward slashes"
+      });
+      return;
+    }
+    
+    // Check if file exists
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) {
+      this.returnCannedResponse(res, { statusCode: 404 });
+      return;
+    }
+    
+    try {
+      let content = await this.app.vault.read(file);
+      const originalContent = content;
+      
+      if (operation === "add") {
+        // Check if tag already exists
+        const cache = this.app.metadataCache.getFileCache(file);
+        const existingTags = new Set<string>();
+        
+        // Collect existing inline tags
+        if (cache?.tags) {
+          for (const tag of cache.tags) {
+            existingTags.add(tag.tag.replace(/^#/, ''));
+          }
+        }
+        
+        // Collect existing frontmatter tags
+        if (cache?.frontmatter?.tags && Array.isArray(cache.frontmatter.tags)) {
+          for (const tag of cache.frontmatter.tags) {
+            existingTags.add(tag.toString());
+          }
+        }
+        
+        if (existingTags.has(tagName)) {
+          res.status(409).json({
+            errorCode: 40902,
+            message: "Tag already exists in this file"
+          });
+          return;
+        }
+        
+        // Add tag to frontmatter if it exists, otherwise add as inline tag
+        const frontmatterRegex = /^---\n([\s\S]*?)\n---/;
+        const frontmatterMatch = content.match(frontmatterRegex);
+        
+        if (frontmatterMatch && cache?.frontmatter) {
+          // Add to frontmatter tags
+          const frontmatterContent = frontmatterMatch[1];
+          
+          if (frontmatterContent.includes('tags:')) {
+            // Add to existing tags array
+            const updatedFrontmatter = frontmatterContent.replace(
+              /tags:\s*\[(.*?)\]/s,
+              (match, tagsContent) => {
+                const tags = tagsContent ? tagsContent.split(',').map((t: string) => t.trim()) : [];
+                tags.push(`"${tagName}"`);
+                return `tags: [${tags.join(', ')}]`;
+              }
+            );
+            content = content.replace(frontmatterMatch[0], `---\n${updatedFrontmatter}\n---`);
+          } else {
+            // Add new tags field
+            const updatedFrontmatter = frontmatterContent + `\ntags: ["${tagName}"]`;
+            content = content.replace(frontmatterMatch[0], `---\n${updatedFrontmatter}\n---`);
+          }
+        } else {
+          // Add as inline tag at the end of the file
+          if (!content.endsWith('\n')) {
+            content += '\n';
+          }
+          content += `\n#${tagName}`;
+        }
+        
+      } else if (operation === "remove") {
+        const cache = this.app.metadataCache.getFileCache(file);
+        let tagFound = false;
+        
+        // Remove inline tags
+        if (cache?.tags) {
+          for (const tag of cache.tags) {
+            const cleanTag = tag.tag.replace(/^#/, '');
+            if (cleanTag === tagName) {
+              const tagPattern = new RegExp(`#${tagName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s|$)`, 'g');
+              content = content.replace(tagPattern, '');
+              tagFound = true;
+            }
+          }
+        }
+        
+        // Remove from frontmatter tags
+        if (cache?.frontmatter?.tags && Array.isArray(cache.frontmatter.tags)) {
+          const hasTag = cache.frontmatter.tags.some(tag => tag.toString() === tagName);
+          
+          if (hasTag) {
+            const frontmatterRegex = /^---\n([\s\S]*?)\n---/;
+            const frontmatterMatch = content.match(frontmatterRegex);
+            
+            if (frontmatterMatch) {
+              const frontmatterContent = frontmatterMatch[1];
+              const updatedFrontmatter = frontmatterContent.replace(
+                /tags:\s*\[(.*?)\]/s,
+                (match, tagsContent) => {
+                  const tags = tagsContent.split(',').map((t: string) => t.trim());
+                  const filteredTags = tags.filter((tag: string) => {
+                    const cleanTag = tag.replace(/^["']|["']$/g, '');
+                    return cleanTag !== tagName;
+                  });
+                  
+                  if (filteredTags.length === 0) {
+                    return ''; // Remove tags field entirely if empty
+                  }
+                  return `tags: [${filteredTags.join(', ')}]`;
+                }
+              ).replace(/\n\s*\n/g, '\n'); // Clean up empty lines
+              
+              content = content.replace(frontmatterMatch[0], `---\n${updatedFrontmatter}\n---`);
+              tagFound = true;
+            }
+          }
+        }
+        
+        if (!tagFound) {
+          this.returnCannedResponse(res, { statusCode: 404 });
+          return;
+        }
+        
+        // Clean up extra whitespace
+        content = content.replace(/\n\s*\n\s*\n/g, '\n\n');
+      }
+      
+      // Write the file if it was modified
+      if (content !== originalContent) {
+        await this.app.vault.adapter.write(path, content);
+        
+        res.json({
+          message: operation === "add" ? "Tag added successfully" : "Tag removed successfully",
+          path,
+          tag: tagName,
+          operation
+        });
+      } else {
+        res.status(304).json({
+          message: "No changes made",
+          path,
+          tag: tagName,
+          operation
+        });
+      }
+      
+    } catch (error) {
+      res.status(500).json({
+        errorCode: 50003,
+        message: `Failed to ${operation} tag: ${error.message}`
+      });
+    }
+  }
+
+  async tagPatch(req: express.Request, res: express.Response): Promise<void> {
+    const oldTag = decodeURIComponent(req.params.tagname);
+    const operation = req.get("Operation");
+    
+    if (operation !== "rename") {
+      res.status(400).json({
+        errorCode: 40007,
+        message: "Only 'rename' operation is supported for tags"
+      });
+      return;
+    }
+    
+    const newTag = typeof req.body === 'string' ? req.body.trim() : '';
+    if (!newTag) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "New tag name is required in request body"
+      });
+      return;
+    }
+    
+    // Validate new tag name (no spaces, special characters)
+    if (!/^[a-zA-Z0-9_\-\/]+$/.test(newTag)) {
+      res.status(400).json({
+        errorCode: 40008,
+        message: "Invalid tag name. Tags can only contain letters, numbers, underscores, hyphens, and forward slashes"
+      });
+      return;
+    }
+    
+    const modifiedFiles: string[] = [];
+    const errors: Array<{ file: string; error: string }> = [];
+    
+    try {
+      // Process all files that contain the tag
+      for (const file of this.app.vault.getMarkdownFiles()) {
+        const cache = this.app.metadataCache.getFileCache(file);
+        if (!cache) continue;
+        
+        let fileModified = false;
+        let content = await this.app.vault.read(file);
+        const originalContent = content;
+        
+        // Replace inline tags
+        const inlineTags = cache.tags ?? [];
+        for (const tag of inlineTags) {
+          const cleanTag = tag.tag.replace(/^#/, '');
+          if (cleanTag === oldTag || cleanTag.startsWith(oldTag + '/')) {
+            const newTagValue = cleanTag === oldTag 
+              ? newTag 
+              : newTag + cleanTag.substring(oldTag.length);
+            
+            // Find and replace the tag in content
+            const oldPattern = new RegExp(`#${cleanTag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s|$)`, 'g');
+            content = content.replace(oldPattern, `#${newTagValue}`);
+            fileModified = true;
+          }
+        }
+        
+        // Update frontmatter tags
+        if (cache.frontmatter?.tags && Array.isArray(cache.frontmatter.tags)) {
+          const tagIndex = cache.frontmatter.tags.findIndex(tag => {
+            const cleanTag = tag.toString();
+            return cleanTag === oldTag || cleanTag.startsWith(oldTag + '/');
+          });
+          
+          if (tagIndex !== -1) {
+            // Parse frontmatter to update tags array
+            const frontmatterRegex = /^---\n([\s\S]*?)\n---/;
+            const frontmatterMatch = content.match(frontmatterRegex);
+            
+            if (frontmatterMatch) {
+              try {
+                // Simple YAML parsing for tags array
+                const frontmatterContent = frontmatterMatch[1];
+                const updatedFrontmatter = frontmatterContent.replace(
+                  /tags:\s*\[(.*?)\]/s,
+                  (match, tagsContent) => {
+                    const tags = tagsContent.split(',').map((t: string) => t.trim());
+                    const updatedTags = tags.map((tag: string) => {
+                      const cleanTag = tag.replace(/^["']|["']$/g, '');
+                      if (cleanTag === oldTag || cleanTag.startsWith(oldTag + '/')) {
+                        const newTagValue = cleanTag === oldTag 
+                          ? newTag 
+                          : newTag + cleanTag.substring(oldTag.length);
+                        return tag.startsWith('"') ? `"${newTagValue}"` : 
+                               tag.startsWith("'") ? `'${newTagValue}'` : newTagValue;
+                      }
+                      return tag;
+                    });
+                    return `tags: [${updatedTags.join(', ')}]`;
+                  }
+                );
+                
+                content = content.replace(frontmatterMatch[0], `---\n${updatedFrontmatter}\n---`);
+                fileModified = true;
+              } catch (e) {
+                errors.push({ file: file.path, error: `Failed to update frontmatter: ${e.message}` });
+              }
+            }
+          }
+        }
+        
+        // Write the file if it was modified
+        if (fileModified && content !== originalContent) {
+          try {
+            await this.app.vault.adapter.write(file.path, content);
+            modifiedFiles.push(file.path);
+          } catch (e) {
+            errors.push({ file: file.path, error: e.message });
+          }
+        }
+      }
+      
+      if (errors.length > 0) {
+        res.status(207).json({
+          message: "Tag rename completed with errors",
+          oldTag,
+          newTag,
+          modifiedFiles,
+          modifiedCount: modifiedFiles.length,
+          errors
+        });
+      } else {
+        res.json({
+          message: "Tag successfully renamed",
+          oldTag,
+          newTag,
+          modifiedFiles,
+          modifiedCount: modifiedFiles.length
+        });
+      }
+      
+    } catch (error) {
+      res.status(500).json({
+        errorCode: 50002,
+        message: `Failed to rename tag: ${error.message}`
       });
     }
   }
@@ -1885,6 +2321,9 @@ export default class RequestHandler {
 
     this.api.route("/search/").post(this.searchQueryPost.bind(this));
     this.api.route("/search/simple/").post(this.searchSimplePost.bind(this));
+
+    this.api.route("/tags/").get(this.tagsGet.bind(this));
+    this.api.route("/tags/:tagname/").get(this.tagGet.bind(this)).patch(this.tagPatch.bind(this));
 
     this.api.route("/open/*").post(this.openPost.bind(this));
 
