@@ -2361,4 +2361,177 @@ describe("requestHandler", () => {
       });
     });
   });
+
+  describe("content negotiation", () => {
+    describe("GET /vault/{path} with Accept headers", () => {
+      beforeEach(() => {
+        // Set up test file
+        const testFile = new TFile();
+        testFile.path = "test-note.md";
+        app.vault._files = [testFile];
+        app.vault._getAbstractFileByPath = testFile;
+        
+        // Set up file content
+        app.vault._readMap = {
+          "test-note.md": "---\ntitle: Test Note\ntags: [test, demo]\nauthor: John Doe\n---\n\n# Test Note\n\nThis is the content of the test note.\n\n## Section 1\n\nSome content here.\n\n## Section 2\n\nMore content here."
+        };
+        
+        // Set up metadata cache
+        app.metadataCache._fileCacheMap = {
+          "test-note.md": {
+            frontmatter: {
+              title: "Test Note",
+              tags: ["test", "demo"],
+              author: "John Doe"
+            },
+            headings: [
+              { level: 1, heading: "Test Note", position: { start: { line: 6 }, end: { line: 6 } } },
+              { level: 2, heading: "Section 1", position: { start: { line: 10 }, end: { line: 10 } } },
+              { level: 2, heading: "Section 2", position: { start: { line: 14 }, end: { line: 14 } } }
+            ],
+            tags: [
+              { tag: "#test" },
+              { tag: "#demo" }
+            ]
+          }
+        };
+        
+        // Mock adapter methods
+        app.vault.adapter._exists = true;
+        app.vault.adapter._stat = { type: "file" };
+        app.vault.adapter._readBinary = new TextEncoder().encode(app.vault._readMap["test-note.md"]);
+      });
+
+      test("default content type returns raw markdown", async () => {
+        const response = await request(server)
+          .get("/vault/test-note.md")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .expect(200);
+          
+        expect(response.headers["content-type"]).toContain("text/markdown");
+        expect(response.text).toContain("---\ntitle: Test Note");
+        expect(response.text).toContain("# Test Note");
+      });
+
+      test("Accept: application/vnd.olrapi.note+json returns full metadata", async () => {
+        const response = await request(server)
+          .get("/vault/test-note.md")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Accept", "application/vnd.olrapi.note+json")
+          .expect(200);
+          
+        expect(response.headers["content-type"]).toContain("application/vnd.olrapi.note+json");
+        const data = response.body;
+        expect(data.path).toEqual("test-note.md");
+        expect(data.content).toBeDefined();
+        expect(data.frontmatter).toBeDefined();
+        expect(data.tags).toBeDefined();
+      });
+
+      test("Accept: application/vnd.olrapi.metadata+json returns metadata only", async () => {
+        const response = await request(server)
+          .get("/vault/test-note.md")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Accept", "application/vnd.olrapi.metadata+json")
+          .expect(200);
+          
+        expect(response.headers["content-type"]).toContain("application/vnd.olrapi.metadata+json");
+        const data = response.body;
+        expect(data.path).toEqual("test-note.md");
+        expect(data.frontmatter).toBeDefined();
+        expect(data.tags).toBeDefined();
+        expect(data.content).toBeUndefined(); // No content in metadata-only response
+      });
+
+      test("Accept: application/vnd.olrapi.frontmatter+json returns frontmatter only", async () => {
+        const response = await request(server)
+          .get("/vault/test-note.md")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Accept", "application/vnd.olrapi.frontmatter+json")
+          .expect(200);
+          
+        expect(response.headers["content-type"]).toContain("application/vnd.olrapi.frontmatter+json");
+        const data = response.body;
+        expect(data.title).toEqual("Test Note");
+        expect(data.tags).toEqual(["test", "demo"]);
+        expect(data.author).toEqual("John Doe");
+        expect(data.content).toBeUndefined();
+        expect(data.path).toBeUndefined();
+      });
+
+      test("Accept: text/plain returns content without frontmatter", async () => {
+        const response = await request(server)
+          .get("/vault/test-note.md")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Accept", "text/plain")
+          .expect(200);
+          
+        expect(response.headers["content-type"]).toEqual("text/plain; charset=utf-8");
+        expect(response.text).not.toContain("---\ntitle:");
+        expect(response.text).toContain("# Test Note");
+        expect(response.text).toContain("This is the content");
+      });
+
+      test("Accept: text/html returns rendered HTML", async () => {
+        const response = await request(server)
+          .get("/vault/test-note.md")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Accept", "text/html")
+          .expect(200);
+          
+        expect(response.headers["content-type"]).toEqual("text/html; charset=utf-8");
+        expect(response.text).toContain("<h1>Test Note</h1>");
+        expect(response.text).toContain("<h2>Section 1</h2>");
+        expect(response.text).toContain("<p>This is the content");
+      });
+
+      test("non-markdown file returns binary content", async () => {
+        const imageFile = new TFile();
+        imageFile.path = "image.png";
+        app.vault._files = [imageFile];
+        app.vault._getAbstractFileByPath = imageFile;
+        app.vault.adapter._readBinary = new ArrayBuffer(8); // Mock binary data
+        
+        const response = await request(server)
+          .get("/vault/image.png")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .expect(200);
+          
+        expect(response.headers["content-type"]).toEqual("image/png");
+      });
+
+      test("file not found returns 404", async () => {
+        app.vault.adapter._exists = false;
+        
+        const response = await request(server)
+          .get("/vault/nonexistent.md")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .expect(404);
+      });
+
+      test("query parameter format=metadata returns metadata", async () => {
+        const response = await request(server)
+          .get("/vault/test-note.md?format=metadata")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .expect(200);
+          
+        expect(response.headers["content-type"]).toContain("application/vnd.olrapi.metadata+json");
+        const data = response.body;
+        expect(data.frontmatter).toBeDefined();
+        expect(data.content).toBeUndefined();
+      });
+
+      test("query parameter format=frontmatter returns frontmatter", async () => {
+        const response = await request(server)
+          .get("/vault/test-note.md?format=frontmatter")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .expect(200);
+          
+        expect(response.headers["content-type"]).toContain("application/vnd.olrapi.frontmatter+json");
+        const data = response.body;
+        expect(data.title).toEqual("Test Note");
+        expect(data.path).toBeUndefined();
+      });
+    });
+  });
 });
