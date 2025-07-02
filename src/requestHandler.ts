@@ -498,6 +498,29 @@ export default class RequestHandler {
     const target =
       targetType == "heading" ? rawTarget.split(targetDelimiter) : rawTarget;
 
+    // Validate operation/target-type combinations BEFORE checking file existence
+    if ((operation === "rename" || operation === "move") && !["file", "directory"].includes(targetType)) {
+      res.status(400).json({
+        errorCode: 40006,
+        message: `Operation '${operation}' is only valid for Target-Type: file or directory`
+      });
+      return;
+    }
+
+    // Check for directory-level operations BEFORE file validation
+    if (targetType === "directory") {
+      if (operation === "move") {
+        if (rawTarget !== "path") {
+          res.status(400).json({
+            errorCode: 40005,
+            message: "move operation must use Target: path"  
+          });
+          return;
+        }
+        return this.handleDirectoryMoveOperation(path, req, res);
+      }
+    }
+
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) {
       this.returnCannedResponse(res, {
@@ -540,16 +563,19 @@ export default class RequestHandler {
       }
     }
     
-    // Validate that file-specific operations are only used with file target type
-    if ((operation === "rename" || operation === "move") && targetType !== "file") {
+    // Check for tag operations
+    if (targetType === "tag") {
+      if (operation === "add" || operation === "remove") {
+        return this.handleTagOperation(path, req, res);
+      }
       res.status(400).json({
-        errorCode: 40006,
-        message: `Operation '${operation}' is only valid for Target-Type: file`
+        errorCode: 40009,
+        message: "Only 'add' or 'remove' operations are supported for Target-Type: tag"
       });
       return;
     }
     
-    if (!["heading", "block", "frontmatter", "file"].includes(targetType)) {
+    if (!["heading", "block", "frontmatter", "file", "directory", "tag"].includes(targetType)) {
       this.returnCannedResponse(res, {
         errorCode: ErrorCode.InvalidTargetTypeHeader,
       });
@@ -561,7 +587,7 @@ export default class RequestHandler {
       });
       return;
     }
-    if (!["append", "prepend", "replace", "rename", "move"].includes(operation)) {
+    if (!["append", "prepend", "replace", "rename", "move", "add", "remove"].includes(operation)) {
       this.returnCannedResponse(res, {
         errorCode: ErrorCode.InvalidOperation,
       });
@@ -677,6 +703,18 @@ export default class RequestHandler {
       req.path.slice(req.path.indexOf("/", 1) + 1)
     );
 
+    // Check for directory operations
+    const targetType = req.get("Target-Type");
+    const operation = req.get("Operation");
+    
+    if (targetType === "directory") {
+      if (operation === "copy") {
+        return this.handleDirectoryCopyOperation(path, req, res);
+      }
+      // Default directory POST is create
+      return this.handleDirectoryCreateOperation(path, req, res);
+    }
+
     return this._vaultPost(path, req, res);
   }
 
@@ -710,6 +748,12 @@ export default class RequestHandler {
     const path = decodeURIComponent(
       req.path.slice(req.path.indexOf("/", 1) + 1)
     );
+
+    // Check for directory deletion
+    const targetType = req.get("Target-Type");
+    if (targetType === "directory") {
+      return this.handleDirectoryDeleteOperation(path, req, res);
+    }
 
     return this._vaultDelete(path, req, res);
   }
@@ -812,6 +856,870 @@ export default class RequestHandler {
       res.status(500).json({
         errorCode: 50001,
         message: `Failed to ${isMove ? 'move' : 'rename'} file: ${error.message}`
+      });
+    }
+  }
+
+  async handleDirectoryMoveOperation(
+    path: string,
+    req: express.Request,
+    res: express.Response
+  ): Promise<void> {
+    if (!path) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "Directory path is required"
+      });
+      return;
+    }
+
+    const newPath = typeof req.body === 'string' ? req.body.trim() : '';
+    if (!newPath) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "New directory path is required in request body"
+      });
+      return;
+    }
+
+    // Check if source directory exists by looking for files with this path prefix
+    const allFiles = this.app.vault.getFiles();
+    const directoryFiles = allFiles.filter(file => 
+      file.path.startsWith(path + "/")
+    );
+    
+    // Check if the path itself is a file (not a directory)
+    const exactFile = allFiles.find(file => file.path === path);
+    if (exactFile) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "Source path is not a directory"
+      });
+      return;
+    }
+    
+    if (directoryFiles.length === 0) {
+      this.returnCannedResponse(res, { statusCode: 404 });
+      return;
+    }
+
+    // Check if destination directory already exists
+    const destFiles = allFiles.filter(file => file.path.startsWith(newPath + "/"));
+    if (destFiles.length > 0) {
+      res.status(409).json({
+        errorCode: 40901,
+        message: "Destination directory already exists"
+      });
+      return;
+    }
+
+    // Create destination directory structure
+    try {
+      await this.app.vault.createFolder(newPath);
+    } catch {
+      // Folder might already exist, continue
+    }
+
+    // Track moved files for potential rollback
+    const movedFiles: Array<{oldPath: string, newPath: string}> = [];
+    
+    try {
+      // Move each file individually to preserve links
+      for (const file of directoryFiles) {
+        const relativePath = file.path.substring(path.length + 1);
+        const newFilePath = `${newPath}/${relativePath}`;
+        
+        // Create intermediate directories if needed
+        const fileParentDir = newFilePath.substring(0, newFilePath.lastIndexOf('/'));
+        if (fileParentDir && fileParentDir !== newPath) {
+          try {
+            await this.app.vault.createFolder(fileParentDir);
+          } catch {
+            // Directory might already exist
+          }
+        }
+        
+        // Use FileManager to move the file (preserves history and updates links)
+        // @ts-ignore - fileManager exists at runtime
+        await this.app.fileManager.renameFile(file, newFilePath);
+        movedFiles.push({oldPath: file.path, newPath: newFilePath});
+      }
+      
+      // Remove empty source directory structure
+      await this.removeEmptyDirectoriesRecursively(path);
+      
+      res.status(200).json({
+        message: "Directory successfully moved",
+        oldPath: path,
+        newPath: newPath,
+        filesMovedCount: directoryFiles.length
+      });
+      
+    } catch (error) {
+      // Attempt rollback
+      for (const moved of movedFiles.reverse()) {
+        try {
+          const movedFile = this.app.vault.getAbstractFileByPath(moved.newPath);
+          if (movedFile instanceof TFile) {
+            // @ts-ignore - fileManager exists at runtime
+            await this.app.fileManager.renameFile(movedFile, moved.oldPath);
+          }
+        } catch (rollbackError) {
+          console.error(`Failed to rollback file ${moved.newPath}:`, rollbackError);
+        }
+      }
+      
+      res.status(500).json({
+        errorCode: 50001,
+        message: `Failed to move directory: ${error.message}`
+      });
+    }
+  }
+
+  async removeEmptyDirectoriesRecursively(dirPath: string): Promise<void> {
+    try {
+      // Check if directory exists and is empty
+      const dirExists = await this.app.vault.adapter.exists(dirPath);
+      if (!dirExists) {
+        return;
+      }
+
+      // List contents of directory
+      const contents = await (this.app.vault.adapter as any).list(dirPath);
+      
+      // If directory has files, don't remove it
+      if (contents.files.length > 0) {
+        return;
+      }
+      
+      // Recursively remove empty subdirectories first
+      for (const subDir of contents.folders) {
+        await this.removeEmptyDirectoriesRecursively(subDir);
+      }
+      
+      // Check again if directory is now empty after removing subdirectories
+      const updatedContents = await (this.app.vault.adapter as any).list(dirPath);
+      if (updatedContents.files.length === 0 && updatedContents.folders.length === 0) {
+        await (this.app.vault.adapter as any).rmdir(dirPath, false);
+      }
+      
+    } catch (error) {
+      // If we can't remove a directory, that's not necessarily fatal
+      console.warn(`Could not remove directory ${dirPath}:`, error);
+    }
+  }
+
+  async handleDirectoryCreateOperation(
+    path: string,
+    req: express.Request,
+    res: express.Response
+  ): Promise<void> {
+    if (!path || path.endsWith("/")) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "Directory path is required and should not end with '/'"
+      });
+      return;
+    }
+
+    // Check if directory already exists
+    try {
+      const exists = await this.app.vault.adapter.exists(path);
+      if (exists) {
+        res.status(409).json({
+          errorCode: 40901,
+          message: "Directory already exists"
+        });
+        return;
+      }
+    } catch (error) {
+      // If we can't check existence, continue with creation attempt
+    }
+
+    // Check if there's a file with the same path
+    const allFiles = this.app.vault.getFiles();
+    const conflictingFile = allFiles.find(file => file.path === path);
+    if (conflictingFile) {
+      res.status(409).json({
+        errorCode: 40902,
+        message: "A file with the same path already exists"
+      });
+      return;
+    }
+
+    try {
+      // Create the directory (this will also create parent directories if needed)
+      await this.app.vault.createFolder(path);
+      
+      res.status(201).json({
+        message: "Directory successfully created",
+        path: path
+      });
+      
+    } catch (error) {
+      res.status(500).json({
+        errorCode: 50001,
+        message: `Failed to create directory: ${error.message}`
+      });
+    }
+  }
+
+  async handleDirectoryDeleteOperation(
+    path: string,
+    req: express.Request,
+    res: express.Response
+  ): Promise<void> {
+    if (!path || path.endsWith("/")) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "Directory path is required and should not end with '/'"
+      });
+      return;
+    }
+
+    // Check if directory exists
+    try {
+      const exists = await this.app.vault.adapter.exists(path);
+      if (!exists) {
+        this.returnCannedResponse(res, { statusCode: 404 });
+        return;
+      }
+    } catch (error) {
+      this.returnCannedResponse(res, { statusCode: 404 });
+      return;
+    }
+
+    // Check if path is actually a directory (not a file)
+    const allFiles = this.app.vault.getFiles();
+    const exactFile = allFiles.find(file => file.path === path);
+    if (exactFile) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "Path is a file, not a directory"
+      });
+      return;
+    }
+
+    // Get all files in the directory
+    const directoryFiles = allFiles.filter(file => 
+      file.path.startsWith(path + "/")
+    );
+
+    // Check if we should move to trash or permanently delete
+    const permanent = req.get("Permanent") === "true";
+    
+    try {
+      let deletedFilesCount = 0;
+      
+      if (permanent) {
+        // Permanently delete all files in the directory
+        for (const file of directoryFiles) {
+          await this.app.vault.adapter.remove(file.path);
+          deletedFilesCount++;
+        }
+        
+        // Remove the empty directory structure
+        await this.removeEmptyDirectoriesRecursively(path);
+      } else {
+        // Move files to trash using Obsidian's trash system
+        for (const file of directoryFiles) {
+          await this.app.vault.trash(file, false);
+          deletedFilesCount++;
+        }
+        
+        // Remove the empty directory structure  
+        await this.removeEmptyDirectoriesRecursively(path);
+      }
+      
+      res.status(200).json({
+        message: permanent ? "Directory permanently deleted" : "Directory moved to trash",
+        path: path,
+        deletedFilesCount: deletedFilesCount,
+        permanent: permanent
+      });
+      
+    } catch (error) {
+      res.status(500).json({
+        errorCode: 50001,
+        message: `Failed to delete directory: ${error.message}`
+      });
+    }
+  }
+
+  async tagsGet(req: express.Request, res: express.Response): Promise<void> {
+    // Collect all tags from all files in the vault
+    const tagCounts: Record<string, number> = {};
+    const tagFiles: Record<string, string[]> = {};
+    
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      if (!cache) continue;
+      
+      // Get inline tags
+      const inlineTags = (cache.tags ?? []).map(tag => tag.tag.replace(/^#/, ''));
+      
+      // Get frontmatter tags
+      const frontmatterTags = Array.isArray(cache.frontmatter?.tags) 
+        ? cache.frontmatter.tags.map(tag => tag.toString())
+        : [];
+      
+      // Combine and deduplicate tags for this file
+      const allTags = [...new Set([...inlineTags, ...frontmatterTags])];
+      
+      // Count tags and track files
+      for (const tag of allTags) {
+        tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+        if (!tagFiles[tag]) {
+          tagFiles[tag] = [];
+        }
+        tagFiles[tag].push(file.path);
+      }
+    }
+    
+    // Convert to array and sort by count (descending) then name (ascending)
+    const tags = Object.entries(tagCounts)
+      .map(([tag, count]) => ({
+        tag,
+        count,
+        files: tagFiles[tag].length
+      }))
+      .sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        return a.tag.localeCompare(b.tag);
+      });
+    
+    res.json({
+      tags,
+      totalTags: tags.length
+    });
+  }
+
+  async tagGet(req: express.Request, res: express.Response): Promise<void> {
+    const tagName = decodeURIComponent(req.params.tagname);
+    const files: Array<{ path: string; occurrences: number }> = [];
+    
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      if (!cache) continue;
+      
+      let occurrences = 0;
+      
+      // Count inline tag occurrences
+      const inlineTags = cache.tags ?? [];
+      for (const tag of inlineTags) {
+        const cleanTag = tag.tag.replace(/^#/, '');
+        if (cleanTag === tagName || cleanTag.startsWith(tagName + '/')) {
+          occurrences++;
+        }
+      }
+      
+      // Check frontmatter tags
+      if (Array.isArray(cache.frontmatter?.tags)) {
+        for (const tag of cache.frontmatter.tags) {
+          const cleanTag = tag.toString();
+          if (cleanTag === tagName || cleanTag.startsWith(tagName + '/')) {
+            occurrences++;
+          }
+        }
+      }
+      
+      if (occurrences > 0) {
+        files.push({
+          path: file.path,
+          occurrences
+        });
+      }
+    }
+    
+    if (files.length === 0) {
+      this.returnCannedResponse(res, { statusCode: 404 });
+      return;
+    }
+    
+    // Sort by occurrences (descending) then path (ascending)
+    files.sort((a, b) => {
+      if (b.occurrences !== a.occurrences) return b.occurrences - a.occurrences;
+      return a.path.localeCompare(b.path);
+    });
+    
+    res.json({
+      tag: tagName,
+      files,
+      totalFiles: files.length,
+      totalOccurrences: files.reduce((sum, f) => sum + f.occurrences, 0)
+    });
+  }
+
+  async handleTagOperation(
+    path: string,
+    req: express.Request,
+    res: express.Response
+  ): Promise<void> {
+    const operation = req.get("Operation");
+    const tagName = req.get("Target");
+    
+    if (!tagName) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "Target header with tag name is required"
+      });
+      return;
+    }
+    
+    // Validate tag name
+    if (!/^[a-zA-Z0-9_\-\/]+$/.test(tagName)) {
+      res.status(400).json({
+        errorCode: 40008,
+        message: "Invalid tag name. Tags can only contain letters, numbers, underscores, hyphens, and forward slashes"
+      });
+      return;
+    }
+    
+    // Check if file exists
+    const file = this.app.vault.getAbstractFileByPath(path);
+    if (!(file instanceof TFile)) {
+      this.returnCannedResponse(res, { statusCode: 404 });
+      return;
+    }
+    
+    try {
+      let content = await this.app.vault.read(file);
+      const originalContent = content;
+      
+      if (operation === "add") {
+        // Check if tag already exists
+        const cache = this.app.metadataCache.getFileCache(file);
+        const existingTags = new Set<string>();
+        
+        // Collect existing inline tags
+        if (cache?.tags) {
+          for (const tag of cache.tags) {
+            existingTags.add(tag.tag.replace(/^#/, ''));
+          }
+        }
+        
+        // Collect existing frontmatter tags
+        if (cache?.frontmatter?.tags && Array.isArray(cache.frontmatter.tags)) {
+          for (const tag of cache.frontmatter.tags) {
+            existingTags.add(tag.toString());
+          }
+        }
+        
+        if (existingTags.has(tagName)) {
+          res.status(409).json({
+            errorCode: 40902,
+            message: "Tag already exists in this file"
+          });
+          return;
+        }
+        
+        // Add tag to frontmatter if it exists, otherwise add as inline tag
+        const frontmatterRegex = /^---\n([\s\S]*?)\n---/;
+        const frontmatterMatch = content.match(frontmatterRegex);
+        
+        if (frontmatterMatch && cache?.frontmatter) {
+          // Add to frontmatter tags
+          const frontmatterContent = frontmatterMatch[1];
+          
+          if (frontmatterContent.includes('tags:')) {
+            // Add to existing tags array
+            const updatedFrontmatter = frontmatterContent.replace(
+              /tags:\s*\[(.*?)\]/s,
+              (match, tagsContent) => {
+                const tags = tagsContent ? tagsContent.split(',').map((t: string) => t.trim()) : [];
+                tags.push(`"${tagName}"`);
+                return `tags: [${tags.join(', ')}]`;
+              }
+            );
+            content = content.replace(frontmatterMatch[0], `---\n${updatedFrontmatter}\n---`);
+          } else {
+            // Add new tags field
+            const updatedFrontmatter = frontmatterContent + `\ntags: ["${tagName}"]`;
+            content = content.replace(frontmatterMatch[0], `---\n${updatedFrontmatter}\n---`);
+          }
+        } else {
+          // Add as inline tag at the end of the file
+          if (!content.endsWith('\n')) {
+            content += '\n';
+          }
+          content += `\n#${tagName}`;
+        }
+        
+      } else if (operation === "remove") {
+        const cache = this.app.metadataCache.getFileCache(file);
+        let tagFound = false;
+        
+        // Remove inline tags
+        if (cache?.tags) {
+          for (const tag of cache.tags) {
+            const cleanTag = tag.tag.replace(/^#/, '');
+            if (cleanTag === tagName) {
+              const tagPattern = new RegExp(`#${tagName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s|$)`, 'g');
+              content = content.replace(tagPattern, '');
+              tagFound = true;
+            }
+          }
+        }
+        
+        // Remove from frontmatter tags
+        if (cache?.frontmatter?.tags && Array.isArray(cache.frontmatter.tags)) {
+          const hasTag = cache.frontmatter.tags.some(tag => tag.toString() === tagName);
+          
+          if (hasTag) {
+            const frontmatterRegex = /^---\n([\s\S]*?)\n---/;
+            const frontmatterMatch = content.match(frontmatterRegex);
+            
+            if (frontmatterMatch) {
+              const frontmatterContent = frontmatterMatch[1];
+              const updatedFrontmatter = frontmatterContent.replace(
+                /tags:\s*\[(.*?)\]/s,
+                (match, tagsContent) => {
+                  const tags = tagsContent.split(',').map((t: string) => t.trim());
+                  const filteredTags = tags.filter((tag: string) => {
+                    const cleanTag = tag.replace(/^["']|["']$/g, '');
+                    return cleanTag !== tagName;
+                  });
+                  
+                  if (filteredTags.length === 0) {
+                    return ''; // Remove tags field entirely if empty
+                  }
+                  return `tags: [${filteredTags.join(', ')}]`;
+                }
+              ).replace(/\n\s*\n/g, '\n'); // Clean up empty lines
+              
+              content = content.replace(frontmatterMatch[0], `---\n${updatedFrontmatter}\n---`);
+              tagFound = true;
+            }
+          }
+        }
+        
+        if (!tagFound) {
+          this.returnCannedResponse(res, { statusCode: 404 });
+          return;
+        }
+        
+        // Clean up extra whitespace
+        content = content.replace(/\n\s*\n\s*\n/g, '\n\n');
+      }
+      
+      // Write the file if it was modified
+      if (content !== originalContent) {
+        await this.app.vault.adapter.write(path, content);
+        
+        res.json({
+          message: operation === "add" ? "Tag added successfully" : "Tag removed successfully",
+          path,
+          tag: tagName,
+          operation
+        });
+      } else {
+        res.status(304).json({
+          message: "No changes made",
+          path,
+          tag: tagName,
+          operation
+        });
+      }
+      
+    } catch (error) {
+      res.status(500).json({
+        errorCode: 50003,
+        message: `Failed to ${operation} tag: ${error.message}`
+      });
+    }
+  }
+
+  async tagPatch(req: express.Request, res: express.Response): Promise<void> {
+    const oldTag = decodeURIComponent(req.params.tagname);
+    const operation = req.get("Operation");
+    
+    if (operation !== "rename") {
+      res.status(400).json({
+        errorCode: 40007,
+        message: "Only 'rename' operation is supported for tags"
+      });
+      return;
+    }
+    
+    const newTag = typeof req.body === 'string' ? req.body.trim() : '';
+    if (!newTag) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "New tag name is required in request body"
+      });
+      return;
+    }
+    
+    // Validate new tag name (no spaces, special characters)
+    if (!/^[a-zA-Z0-9_\-\/]+$/.test(newTag)) {
+      res.status(400).json({
+        errorCode: 40008,
+        message: "Invalid tag name. Tags can only contain letters, numbers, underscores, hyphens, and forward slashes"
+      });
+      return;
+    }
+    
+    const modifiedFiles: string[] = [];
+    const errors: Array<{ file: string; error: string }> = [];
+    
+    try {
+      // Process all files that contain the tag
+      for (const file of this.app.vault.getMarkdownFiles()) {
+        const cache = this.app.metadataCache.getFileCache(file);
+        if (!cache) continue;
+        
+        let fileModified = false;
+        let content = await this.app.vault.read(file);
+        const originalContent = content;
+        
+        // Replace inline tags
+        const inlineTags = cache.tags ?? [];
+        for (const tag of inlineTags) {
+          const cleanTag = tag.tag.replace(/^#/, '');
+          if (cleanTag === oldTag || cleanTag.startsWith(oldTag + '/')) {
+            const newTagValue = cleanTag === oldTag 
+              ? newTag 
+              : newTag + cleanTag.substring(oldTag.length);
+            
+            // Find and replace the tag in content
+            const oldPattern = new RegExp(`#${cleanTag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s|$)`, 'g');
+            content = content.replace(oldPattern, `#${newTagValue}`);
+            fileModified = true;
+          }
+        }
+        
+        // Update frontmatter tags
+        if (cache.frontmatter?.tags && Array.isArray(cache.frontmatter.tags)) {
+          const tagIndex = cache.frontmatter.tags.findIndex(tag => {
+            const cleanTag = tag.toString();
+            return cleanTag === oldTag || cleanTag.startsWith(oldTag + '/');
+          });
+          
+          if (tagIndex !== -1) {
+            // Parse frontmatter to update tags array
+            const frontmatterRegex = /^---\n([\s\S]*?)\n---/;
+            const frontmatterMatch = content.match(frontmatterRegex);
+            
+            if (frontmatterMatch) {
+              try {
+                // Simple YAML parsing for tags array
+                const frontmatterContent = frontmatterMatch[1];
+                const updatedFrontmatter = frontmatterContent.replace(
+                  /tags:\s*\[(.*?)\]/s,
+                  (match, tagsContent) => {
+                    const tags = tagsContent.split(',').map((t: string) => t.trim());
+                    const updatedTags = tags.map((tag: string) => {
+                      const cleanTag = tag.replace(/^["']|["']$/g, '');
+                      if (cleanTag === oldTag || cleanTag.startsWith(oldTag + '/')) {
+                        const newTagValue = cleanTag === oldTag 
+                          ? newTag 
+                          : newTag + cleanTag.substring(oldTag.length);
+                        return tag.startsWith('"') ? `"${newTagValue}"` : 
+                               tag.startsWith("'") ? `'${newTagValue}'` : newTagValue;
+                      }
+                      return tag;
+                    });
+                    return `tags: [${updatedTags.join(', ')}]`;
+                  }
+                );
+                
+                content = content.replace(frontmatterMatch[0], `---\n${updatedFrontmatter}\n---`);
+                fileModified = true;
+              } catch (e) {
+                errors.push({ file: file.path, error: `Failed to update frontmatter: ${e.message}` });
+              }
+            }
+          }
+        }
+        
+        // Write the file if it was modified
+        if (fileModified && content !== originalContent) {
+          try {
+            await this.app.vault.adapter.write(file.path, content);
+            modifiedFiles.push(file.path);
+          } catch (e) {
+            errors.push({ file: file.path, error: e.message });
+          }
+        }
+      }
+      
+      if (errors.length > 0) {
+        res.status(207).json({
+          message: "Tag rename completed with errors",
+          oldTag,
+          newTag,
+          modifiedFiles,
+          modifiedCount: modifiedFiles.length,
+          errors
+        });
+      } else {
+        res.json({
+          message: "Tag successfully renamed",
+          oldTag,
+          newTag,
+          modifiedFiles,
+          modifiedCount: modifiedFiles.length
+        });
+      }
+      
+    } catch (error) {
+      res.status(500).json({
+        errorCode: 50002,
+        message: `Failed to rename tag: ${error.message}`
+      });
+    }
+  }
+
+  async handleDirectoryCopyOperation(
+    destinationPath: string,
+    req: express.Request,
+    res: express.Response
+  ): Promise<void> {
+    if (!destinationPath) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "Destination path is required"
+      });
+      return;
+    }
+
+    // Source path should be in the request body
+    const sourcePath = typeof req.body === 'string' ? req.body.trim() : '';
+    
+    if (!sourcePath) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "Source path is required in request body"
+      });
+      return;
+    }
+
+    try {
+      // Check if source directory exists
+      const sourceExists = await this.app.vault.adapter.exists(sourcePath);
+      if (!sourceExists) {
+        res.status(404).json({
+          errorCode: 40401,
+          message: `Source directory not found: ${sourcePath}`
+        });
+        return;
+      }
+
+      // Check if source is actually a directory
+      const sourceStat = await this.app.vault.adapter.stat(sourcePath);
+      if (sourceStat.type !== 'folder') {
+        res.status(400).json({
+          errorCode: 40004,
+          message: `Source is not a directory: ${sourcePath}`
+        });
+        return;
+      }
+
+      // Check if destination already exists
+      const destExists = await this.app.vault.adapter.exists(destinationPath);
+      if (destExists) {
+        res.status(409).json({
+          errorCode: 40901,
+          message: `Destination already exists: ${destinationPath}`
+        });
+        return;
+      }
+
+      // Get all files in the source directory recursively
+      const allFiles = this.app.vault.getFiles();
+      const sourceFiles = allFiles.filter(file => file.path.startsWith(sourcePath + '/'));
+      
+      if (sourceFiles.length === 0) {
+        // Empty directory - just create the destination
+        try {
+          await this.app.vault.createFolder(destinationPath);
+        } catch (error) {
+          // Folder might already exist or parent doesn't exist
+          res.status(500).json({
+            errorCode: 50001,
+            message: `Failed to create destination directory: ${error.message}`
+          });
+          return;
+        }
+        
+        res.status(201).json({
+          message: "Empty directory copied successfully",
+          source: sourcePath,
+          destination: destinationPath,
+          copiedFilesCount: 0
+        });
+        return;
+      }
+
+      // Copy files one by one to the new location
+      const copiedFiles: Array<{source: string, destination: string}> = [];
+      
+      try {
+        // Create destination directory first
+        await this.app.vault.createFolder(destinationPath);
+        
+        for (const file of sourceFiles) {
+          // Calculate relative path from source directory
+          const relativePath = file.path.substring(sourcePath.length + 1);
+          const newPath = `${destinationPath}/${relativePath}`;
+          
+          // Create parent directories if needed
+          const parentDir = newPath.substring(0, newPath.lastIndexOf('/'));
+          if (parentDir && parentDir !== destinationPath) {
+            try {
+              await this.app.vault.createFolder(parentDir);
+            } catch {
+              // Directory might already exist
+            }
+          }
+          
+          // Read content from source file
+          const content = await this.app.vault.read(file);
+          
+          // Write to destination
+          await this.app.vault.adapter.write(newPath, content);
+          
+          copiedFiles.push({
+            source: file.path,
+            destination: newPath
+          });
+        }
+        
+        res.status(201).json({
+          message: "Directory copied successfully",
+          source: sourcePath,
+          destination: destinationPath,
+          copiedFilesCount: copiedFiles.length,
+          copiedFiles: copiedFiles
+        });
+        
+      } catch (error) {
+        // Attempt to clean up any partially copied files
+        for (const copied of copiedFiles) {
+          try {
+            await this.app.vault.adapter.remove(copied.destination);
+          } catch (cleanupError) {
+            console.error(`Failed to cleanup file ${copied.destination}:`, cleanupError);
+          }
+        }
+        
+        // Try to remove the destination directory if it was created
+        try {
+          await this.removeEmptyDirectoriesRecursively(destinationPath);
+        } catch (cleanupError) {
+          console.error(`Failed to cleanup directory ${destinationPath}:`, cleanupError);
+        }
+        
+        res.status(500).json({
+          errorCode: 50001,
+          message: `Failed to copy directory: ${error.message}`
+        });
+      }
+      
+    } catch (error) {
+      res.status(500).json({
+        errorCode: 50001,
+        message: `Failed to copy directory: ${error.message}`
       });
     }
   }
@@ -1178,6 +2086,394 @@ export default class RequestHandler {
     return Boolean(value);
   }
 
+  async searchAdvancedPost(
+    req: express.Request,
+    res: express.Response
+  ): Promise<void> {
+    interface AdvancedSearchQuery {
+      // Content search
+      content?: {
+        query?: string;           // Simple text search
+        regex?: string;           // Regex pattern
+        caseSensitive?: boolean;  // Case sensitivity for searches
+      };
+      // Frontmatter filters
+      frontmatter?: Record<string, any>; // Frontmatter field queries
+      // File metadata filters
+      metadata?: {
+        path?: string;            // Path glob pattern
+        extension?: string;       // File extension filter
+        sizeMin?: number;         // Minimum file size in bytes
+        sizeMax?: number;         // Maximum file size in bytes
+        createdAfter?: string;    // ISO date string
+        createdBefore?: string;   // ISO date string
+        modifiedAfter?: string;   // ISO date string
+        modifiedBefore?: string;  // ISO date string
+      };
+      // Tag filters
+      tags?: {
+        include?: string[];       // Must have all these tags
+        exclude?: string[];       // Must not have any of these tags
+        any?: string[];          // Must have at least one of these tags
+      };
+      // Pagination
+      pagination?: {
+        page?: number;           // Page number (0-based)
+        limit?: number;          // Results per page (default 50, max 200)
+      };
+      // Options
+      options?: {
+        contextLength?: number;  // Context length for matches (default 100)
+        includeContent?: boolean; // Include full content in results
+        sortBy?: 'score' | 'path' | 'modified' | 'created' | 'size';
+        sortOrder?: 'asc' | 'desc';
+      };
+    }
+
+    try {
+      const query = req.body as AdvancedSearchQuery;
+      const results: Array<any> = [];
+      
+      // Validate regex early if provided
+      if (query.content?.regex) {
+        try {
+          new RegExp(query.content.regex);
+        } catch (e) {
+          res.status(400).json({
+            errorCode: 40009,
+            message: `Invalid regex pattern: ${e.message}`
+          });
+          return;
+        }
+      }
+      
+      // Pagination defaults
+      const page = query.pagination?.page ?? 0;
+      const limit = Math.min(query.pagination?.limit ?? 50, 200);
+      const contextLength = query.options?.contextLength ?? 100;
+      
+      // Process each file
+      for (const file of this.app.vault.getMarkdownFiles()) {
+        let matches = true;
+        const fileResult: any = {
+          path: file.path,
+          matches: []
+        };
+        
+        // Content search
+        if (query.content) {
+          const content = await this.app.vault.cachedRead(file);
+          let contentMatches = false;
+          
+          if (query.content.query) {
+            // Simple text search
+            if (query.content.caseSensitive === false) {
+              // Case insensitive search
+              const searchQuery = query.content.query.toLowerCase();
+              const contentLower = content.toLowerCase();
+              let index = contentLower.indexOf(searchQuery);
+              
+              while (index !== -1) {
+                contentMatches = true;
+                fileResult.matches.push({
+                  type: 'text',
+                  match: { start: index, end: index + query.content.query.length },
+                  context: content.slice(
+                    Math.max(index - contextLength, 0),
+                    index + query.content.query.length + contextLength
+                  )
+                });
+                index = contentLower.indexOf(searchQuery, index + 1);
+              }
+            } else {
+              // Use Obsidian's search function (case sensitive by default)
+              const searchFunc = prepareSimpleSearch(query.content.query);
+              const result = searchFunc(content);
+              if (result) {
+                contentMatches = true;
+                fileResult.score = result.score;
+                for (const match of result.matches) {
+                  fileResult.matches.push({
+                    type: 'text',
+                    match: { start: match[0], end: match[1] },
+                    context: content.slice(
+                      Math.max(match[0] - contextLength, 0),
+                      match[1] + contextLength
+                    )
+                  });
+                }
+              }
+            }
+          }
+          
+          if (query.content.regex) {
+            // Regex search
+            try {
+              const flags = query.content.caseSensitive ? 'g' : 'gi';
+              const regex = new RegExp(query.content.regex, flags);
+              let match;
+              while ((match = regex.exec(content)) !== null) {
+                contentMatches = true;
+                fileResult.matches.push({
+                  type: 'regex',
+                  match: { start: match.index, end: match.index + match[0].length },
+                  context: content.slice(
+                    Math.max(match.index - contextLength, 0),
+                    match.index + match[0].length + contextLength
+                  )
+                });
+              }
+            } catch (e) {
+              res.status(400).json({
+                errorCode: 40009,
+                message: `Invalid regex pattern: ${e.message}`
+              });
+              return;
+            }
+          }
+          
+          if (!contentMatches) {
+            matches = false;
+          }
+        }
+        
+        // Frontmatter filters
+        if (query.frontmatter && matches) {
+          const cache = this.app.metadataCache.getFileCache(file);
+          const frontmatter = cache?.frontmatter || {};
+          
+          // Check each frontmatter condition
+          for (const [field, expectedValue] of Object.entries(query.frontmatter)) {
+            const actualValue = frontmatter[field];
+            
+            // Handle special comparison operators
+            if (expectedValue && typeof expectedValue === 'object' && expectedValue.contains) {
+              // Array contains check
+              if (!Array.isArray(actualValue) || !actualValue.includes(expectedValue.contains)) {
+                matches = false;
+                break;
+              }
+            } else {
+              // Use json-logic for direct comparisons
+              const result = jsonLogic.apply(
+                { "==": [{ var: "actual" }, { var: "expected" }] },
+                { actual: actualValue, expected: expectedValue }
+              );
+              
+              if (!result) {
+                matches = false;
+                break;
+              }
+            }
+          }
+        }
+        
+        // File metadata filters
+        if (query.metadata && matches) {
+          // Path filter
+          if (query.metadata.path) {
+            const pathRegex = WildcardRegexp(query.metadata.path);
+            if (!pathRegex.test(file.path)) {
+              matches = false;
+            }
+          }
+          
+          // Extension filter
+          if (query.metadata.extension && matches) {
+            if (!file.path.endsWith(query.metadata.extension)) {
+              matches = false;
+            }
+          }
+          
+          // Size filters
+          if ((query.metadata.sizeMin !== undefined || query.metadata.sizeMax !== undefined) && matches) {
+            const stat = file.stat;
+            if (query.metadata.sizeMin !== undefined && stat.size < query.metadata.sizeMin) {
+              matches = false;
+            }
+            if (query.metadata.sizeMax !== undefined && stat.size > query.metadata.sizeMax) {
+              matches = false;
+            }
+          }
+          
+          // Date filters
+          if (matches) {
+            const stat = file.stat;
+            
+            if (query.metadata.createdAfter) {
+              const afterDate = new Date(query.metadata.createdAfter).getTime();
+              if (stat.ctime < afterDate) matches = false;
+            }
+            
+            if (query.metadata.createdBefore) {
+              const beforeDate = new Date(query.metadata.createdBefore).getTime();
+              if (stat.ctime > beforeDate) matches = false;
+            }
+            
+            if (query.metadata.modifiedAfter) {
+              const afterDate = new Date(query.metadata.modifiedAfter).getTime();
+              if (stat.mtime < afterDate) matches = false;
+            }
+            
+            if (query.metadata.modifiedBefore) {
+              const beforeDate = new Date(query.metadata.modifiedBefore).getTime();
+              if (stat.mtime > beforeDate) matches = false;
+            }
+          }
+        }
+        
+        // Tag filters
+        if (query.tags && matches) {
+          const cache = this.app.metadataCache.getFileCache(file);
+          const fileTags = new Set<string>();
+          
+          // Collect all tags
+          if (cache?.tags) {
+            for (const tag of cache.tags) {
+              fileTags.add(tag.tag.replace(/^#/, ''));
+            }
+          }
+          if (cache?.frontmatter?.tags && Array.isArray(cache.frontmatter.tags)) {
+            for (const tag of cache.frontmatter.tags) {
+              fileTags.add(tag.toString());
+            }
+          }
+          
+          // Check include tags (must have all)
+          if (query.tags.include) {
+            for (const tag of query.tags.include) {
+              if (!fileTags.has(tag)) {
+                matches = false;
+                break;
+              }
+            }
+          }
+          
+          // Check exclude tags (must not have any)
+          if (query.tags.exclude && matches) {
+            for (const tag of query.tags.exclude) {
+              if (fileTags.has(tag)) {
+                matches = false;
+                break;
+              }
+            }
+          }
+          
+          // Check any tags (must have at least one)
+          if (query.tags.any && matches) {
+            let hasAny = false;
+            for (const tag of query.tags.any) {
+              if (fileTags.has(tag)) {
+                hasAny = true;
+                break;
+              }
+            }
+            if (!hasAny) matches = false;
+          }
+        }
+        
+        // Add to results if matches
+        if (matches) {
+          // Add file metadata
+          fileResult.metadata = {
+            size: file.stat.size,
+            created: file.stat.ctime,
+            modified: file.stat.mtime
+          };
+          
+          // Add frontmatter if requested
+          const cache = this.app.metadataCache.getFileCache(file);
+          if (cache?.frontmatter) {
+            fileResult.frontmatter = cache.frontmatter;
+          }
+          
+          // Add tags
+          const tags = new Set<string>();
+          if (cache?.tags) {
+            for (const tag of cache.tags) {
+              tags.add(tag.tag.replace(/^#/, ''));
+            }
+          }
+          if (cache?.frontmatter?.tags && Array.isArray(cache.frontmatter.tags)) {
+            for (const tag of cache.frontmatter.tags) {
+              tags.add(tag.toString());
+            }
+          }
+          if (tags.size > 0) {
+            fileResult.tags = Array.from(tags);
+          }
+          
+          // Add content if requested
+          if (query.options?.includeContent) {
+            fileResult.content = await this.app.vault.cachedRead(file);
+          }
+          
+          // Add context from first match if available
+          if (fileResult.matches.length > 0) {
+            fileResult.context = fileResult.matches[0].context;
+          }
+          
+          results.push(fileResult);
+        }
+      }
+      
+      // Sort results
+      const sortBy = query.options?.sortBy ?? 'score';
+      const sortOrder = query.options?.sortOrder ?? 'desc';
+      
+      results.sort((a, b) => {
+        let comparison = 0;
+        
+        switch (sortBy) {
+          case 'score':
+            comparison = (a.score ?? 0) - (b.score ?? 0);
+            break;
+          case 'path':
+            comparison = a.path.localeCompare(b.path);
+            break;
+          case 'modified':
+            comparison = a.metadata.modified - b.metadata.modified;
+            break;
+          case 'created':
+            comparison = a.metadata.created - b.metadata.created;
+            break;
+          case 'size':
+            comparison = a.metadata.size - b.metadata.size;
+            break;
+        }
+        
+        return sortOrder === 'asc' ? comparison : -comparison;
+      });
+      
+      // Apply pagination
+      const totalResults = results.length;
+      const totalPages = Math.ceil(totalResults / limit);
+      const paginatedResults = results.slice(page * limit, (page + 1) * limit);
+      
+      res.json({
+        results: paginatedResults,
+        total: totalResults,
+        page,
+        limit,
+        totalPages,
+        pagination: {
+          page,
+          limit,
+          totalResults,
+          totalPages,
+          hasNext: page < totalPages - 1,
+          hasPrevious: page > 0
+        }
+      });
+      
+    } catch (error) {
+      this.returnCannedResponse(res, {
+        errorCode: ErrorCode.InvalidFilterQuery,
+        message: error.message
+      });
+    }
+  }
+
   async searchQueryPost(
     req: express.Request,
     res: express.Response
@@ -1413,6 +2709,10 @@ export default class RequestHandler {
 
     this.api.route("/search/").post(this.searchQueryPost.bind(this));
     this.api.route("/search/simple/").post(this.searchSimplePost.bind(this));
+    this.api.route("/search/advanced/").post(this.searchAdvancedPost.bind(this));
+
+    this.api.route("/tags/").get(this.tagsGet.bind(this));
+    this.api.route("/tags/:tagname/").get(this.tagGet.bind(this)).patch(this.tagPatch.bind(this));
 
     this.api.route("/open/*").post(this.openPost.bind(this));
 

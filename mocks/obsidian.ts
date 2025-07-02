@@ -83,6 +83,8 @@ export class Vault {
 
   async createFolder(path: string): Promise<void> {}
 
+  async trash(file: TFile, system?: boolean): Promise<void> {}
+
   getFiles(): TFile[] {
     return this._files;
   }
