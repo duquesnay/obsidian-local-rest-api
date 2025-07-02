@@ -10,6 +10,7 @@ import {
   Command,
   HeadingCache,
   PluginManifest,
+  CachedMetadata,
 } from "../mocks/obsidian";
 
 describe("requestHandler", () => {
@@ -1587,6 +1588,344 @@ describe("requestHandler", () => {
             
           expect(response.body.message).toEqual("New directory path is required in request body");
         });
+      });
+    });
+  });
+
+  describe("tags", () => {
+    describe("GET /tags", () => {
+      test("list all tags in vault", async () => {
+        const file1 = new TFile();
+        file1.path = "file1.md";
+        const file2 = new TFile();
+        file2.path = "file2.md";
+        
+        app.vault._markdownFiles = [file1, file2];
+        
+        // Mock metadata cache
+        const cache1 = new CachedMetadata();
+        cache1.tags = [{ tag: "#project" }, { tag: "#todo" }];
+        cache1.frontmatter = { tags: ["important"] };
+        
+        const cache2 = new CachedMetadata();
+        cache2.tags = [{ tag: "#project" }];
+        cache2.frontmatter = { tags: ["todo", "important"] };
+        
+        app.metadataCache.getFileCache = jest.fn()
+          .mockReturnValueOnce(cache1)
+          .mockReturnValueOnce(cache2);
+        
+        const response = await request(server)
+          .get("/tags/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .expect(200);
+          
+        expect(response.body.tags).toHaveLength(3);
+        // Tags are sorted by count (desc) then name (asc) - all have same count so alphabetical
+        expect(response.body.tags[0]).toEqual({ tag: "important", count: 2, files: 2 });
+        expect(response.body.tags[1]).toEqual({ tag: "project", count: 2, files: 2 });
+        expect(response.body.tags[2]).toEqual({ tag: "todo", count: 2, files: 2 });
+        expect(response.body.totalTags).toEqual(3);
+      });
+
+      test("empty vault returns empty tags", async () => {
+        app.vault._markdownFiles = [];
+        
+        const response = await request(server)
+          .get("/tags/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .expect(200);
+          
+        expect(response.body.tags).toHaveLength(0);
+        expect(response.body.totalTags).toEqual(0);
+      });
+    });
+
+    describe("GET /tags/{tagname}", () => {
+      test("get files with specific tag", async () => {
+        const file1 = new TFile();
+        file1.path = "file1.md";
+        const file2 = new TFile();
+        file2.path = "file2.md";
+        const file3 = new TFile();
+        file3.path = "file3.md";
+        
+        app.vault._markdownFiles = [file1, file2, file3];
+        
+        // Mock metadata cache
+        const cache1 = new CachedMetadata();
+        cache1.tags = [{ tag: "#project" }, { tag: "#project" }]; // Two occurrences
+        
+        const cache2 = new CachedMetadata();
+        cache2.frontmatter = { tags: ["project"] }; // One occurrence
+        
+        const cache3 = new CachedMetadata();
+        cache3.tags = [{ tag: "#other" }];
+        
+        app.metadataCache.getFileCache = jest.fn()
+          .mockReturnValueOnce(cache1)
+          .mockReturnValueOnce(cache2)
+          .mockReturnValueOnce(cache3);
+        
+        const response = await request(server)
+          .get("/tags/project/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .expect(200);
+          
+        expect(response.body.tag).toEqual("project");
+        expect(response.body.files).toHaveLength(2);
+        expect(response.body.files[0]).toEqual({ path: "file1.md", occurrences: 2 });
+        expect(response.body.files[1]).toEqual({ path: "file2.md", occurrences: 1 });
+        expect(response.body.totalFiles).toEqual(2);
+        expect(response.body.totalOccurrences).toEqual(3);
+      });
+
+      test("tag not found returns 404", async () => {
+        const file1 = new TFile();
+        file1.path = "file1.md";
+        
+        app.vault._markdownFiles = [file1];
+        
+        const cache1 = new CachedMetadata();
+        cache1.tags = [{ tag: "#other" }];
+        
+        app.metadataCache.getFileCache = jest.fn().mockReturnValue(cache1);
+        
+        await request(server)
+          .get("/tags/nonexistent/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .expect(404);
+      });
+
+      test("nested tags are matched", async () => {
+        const file1 = new TFile();
+        file1.path = "file1.md";
+        
+        app.vault._markdownFiles = [file1];
+        
+        const cache1 = new CachedMetadata();
+        cache1.tags = [{ tag: "#project/web" }, { tag: "#project/mobile" }];
+        
+        app.metadataCache.getFileCache = jest.fn().mockReturnValue(cache1);
+        
+        const response = await request(server)
+          .get("/tags/project/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .expect(200);
+          
+        expect(response.body.files).toHaveLength(1);
+        expect(response.body.files[0].occurrences).toEqual(2);
+      });
+    });
+
+    describe("PATCH /tags/{tagname}", () => {
+      test("rename tag across vault", async () => {
+        const file1 = new TFile();
+        file1.path = "file1.md";
+        const file2 = new TFile();
+        file2.path = "file2.md";
+        
+        app.vault._markdownFiles = [file1, file2];
+        app.vault._read = "Some content #oldtag more content";
+        
+        const cache1 = new CachedMetadata();
+        cache1.tags = [{ tag: "#oldtag" }];
+        
+        const cache2 = new CachedMetadata();
+        cache2.frontmatter = { tags: ["oldtag"] };
+        
+        app.metadataCache.getFileCache = jest.fn()
+          .mockReturnValueOnce(cache1)
+          .mockReturnValueOnce(cache2)
+          .mockReturnValueOnce(cache1)
+          .mockReturnValueOnce(cache2);
+        
+        const response = await request(server)
+          .patch("/tags/oldtag/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Operation", "rename")
+          .set("Content-Type", "text/plain")
+          .send("newtag")
+          .expect(200);
+          
+        expect(response.body.message).toEqual("Tag successfully renamed");
+        expect(response.body.oldTag).toEqual("oldtag");
+        expect(response.body.newTag).toEqual("newtag");
+        expect(response.body.modifiedCount).toEqual(1);
+      });
+
+      test("rename with invalid tag name", async () => {
+        const response = await request(server)
+          .patch("/tags/oldtag/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Operation", "rename")
+          .set("Content-Type", "text/plain")
+          .send("new tag with spaces")
+          .expect(400);
+          
+        expect(response.body.message).toContain("Invalid tag name");
+      });
+
+      test("rename with invalid operation", async () => {
+        const response = await request(server)
+          .patch("/tags/oldtag/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Operation", "delete")
+          .set("Content-Type", "text/plain")
+          .send("newtag")
+          .expect(400);
+          
+        expect(response.body.message).toEqual("Only 'rename' operation is supported for tags");
+      });
+
+      test("rename without new tag name", async () => {
+        const response = await request(server)
+          .patch("/tags/oldtag/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Operation", "rename")
+          .set("Content-Type", "text/plain")
+          .send("")
+          .expect(400);
+          
+        expect(response.body.message).toEqual("New tag name is required in request body");
+      });
+    });
+
+    describe("PATCH /vault/{filepath} with Target-Type: tag", () => {
+      test("add tag to file", async () => {
+        const filePath = "test.md";
+        app.vault._getAbstractFileByPath = new TFile();
+        app.vault._read = "Some content";
+        
+        const cache = new CachedMetadata();
+        cache.tags = [];
+        app.metadataCache._getFileCache = cache;
+        
+        const response = await request(server)
+          .patch(`/vault/${filePath}`)
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Target-Type", "tag")
+          .set("Operation", "add")
+          .set("Target", "newtag")
+          .set("Content-Type", "text/plain")
+          .send("")
+          .expect(200);
+          
+        expect(response.body.message).toEqual("Tag added successfully");
+        expect(response.body.tag).toEqual("newtag");
+        expect(response.body.operation).toEqual("add");
+      });
+
+      test("add tag that already exists", async () => {
+        const filePath = "test.md";
+        app.vault._getAbstractFileByPath = new TFile();
+        app.vault._read = "Some content #existing";
+        
+        const cache = new CachedMetadata();
+        cache.tags = [{ tag: "#existing" }];
+        app.metadataCache._getFileCache = cache;
+        
+        const response = await request(server)
+          .patch(`/vault/${filePath}`)
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Target-Type", "tag")
+          .set("Operation", "add")
+          .set("Target", "existing")
+          .set("Content-Type", "text/plain")
+          .send("")
+          .expect(409);
+          
+        expect(response.body.message).toEqual("Tag already exists in this file");
+      });
+
+      test("remove tag from file", async () => {
+        const filePath = "test.md";
+        app.vault._getAbstractFileByPath = new TFile();
+        app.vault._read = "Some content #removeme more content";
+        
+        const cache = new CachedMetadata();
+        cache.tags = [{ tag: "#removeme" }];
+        app.metadataCache._getFileCache = cache;
+        
+        const response = await request(server)
+          .patch(`/vault/${filePath}`)
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Target-Type", "tag")
+          .set("Operation", "remove")
+          .set("Target", "removeme")
+          .set("Content-Type", "text/plain")
+          .send("")
+          .expect(200);
+          
+        expect(response.body.message).toEqual("Tag removed successfully");
+        expect(response.body.tag).toEqual("removeme");
+        expect(response.body.operation).toEqual("remove");
+        expect(app.vault.adapter._write[1]).not.toContain("#removeme");
+      });
+
+      test("remove tag that doesn't exist", async () => {
+        const filePath = "test.md";
+        app.vault._getAbstractFileByPath = new TFile();
+        app.vault._read = "Some content";
+        
+        const cache = new CachedMetadata();
+        cache.tags = [];
+        app.metadataCache._getFileCache = cache;
+        
+        await request(server)
+          .patch(`/vault/${filePath}`)
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Target-Type", "tag")
+          .set("Operation", "remove")
+          .set("Target", "nonexistent")
+          .set("Content-Type", "text/plain")
+          .send("")
+          .expect(404);
+      });
+
+      test("invalid tag operation", async () => {
+        const response = await request(server)
+          .patch("/vault/test.md")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Target-Type", "tag")
+          .set("Operation", "delete")
+          .set("Target", "tag")
+          .set("Content-Type", "text/plain")
+          .send("")
+          .expect(400);
+          
+        expect(response.body.message).toEqual("Only 'add' or 'remove' operations are supported for Target-Type: tag");
+      });
+
+      test("missing tag name in Target header", async () => {
+        app.vault._getAbstractFileByPath = new TFile();
+        
+        const response = await request(server)
+          .patch("/vault/test.md")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Target-Type", "tag")
+          .set("Operation", "add")
+          .set("Content-Type", "text/plain")
+          .send("")
+          .expect(400);
+          
+        expect(response.body.message).toEqual("Target header with tag name is required");
+      });
+
+      test("invalid tag name with special characters", async () => {
+        app.vault._getAbstractFileByPath = new TFile();
+        
+        const response = await request(server)
+          .patch("/vault/test.md")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Target-Type", "tag")
+          .set("Operation", "add")
+          .set("Target", "tag with spaces!")
+          .set("Content-Type", "text/plain")
+          .send("")
+          .expect(400);
+          
+        expect(response.body.message).toContain("Invalid tag name");
       });
     });
   });
