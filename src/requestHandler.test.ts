@@ -1018,18 +1018,18 @@ describe("requestHandler", () => {
           const oldPath = "folder1";
           const newPath = "folder2";
           
-          // Mock source directory exists
-          app.vault.adapter._exists = true;
-          app.vault.adapter._stat.type = "folder";
+          // Mock files in source directory
+          const sourceFile = new TFile();
+          sourceFile.path = "folder1/file.md";
           
-          // Set up mock to return true for destination exists check
-          let existsCallCount = 0;
-          app.vault.adapter.exists = jest.fn().mockImplementation((path) => {
-            existsCallCount++;
-            if (existsCallCount === 1) return Promise.resolve(true); // source exists
-            if (existsCallCount === 2) return Promise.resolve(true); // destination exists
-            return Promise.resolve(false);
-          });
+          // Mock files in destination directory (indicates it exists)
+          const destFile = new TFile();
+          destFile.path = "folder2/existing.md";
+          
+          app.vault._files = [sourceFile, destFile];
+          
+          // Mock createFolder
+          app.vault.createFolder = jest.fn().mockResolvedValue(undefined);
           
           const response = await request(server)
             .patch(`/vault/${oldPath}`)
@@ -1066,9 +1066,11 @@ describe("requestHandler", () => {
           const oldPath = "file.md";
           const newPath = "new-folder";
           
-          // Mock file exists but is not a directory
-          app.vault.adapter._exists = true;
-          app.vault.adapter._stat.type = "file";
+          // Mock a file at the source path (not a directory)
+          const sourceFile = new TFile();
+          sourceFile.path = "file.md";
+          
+          app.vault._files = [sourceFile];
           
           const response = await request(server)
             .patch(`/vault/${oldPath}`)
