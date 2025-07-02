@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(npm run build:*)",
+      "Bash(python:*)",
+      "Bash(cp:*)",
+      "Bash(curl -k -X POST https://127.0.0.1:27124/commands/app:reload/ -H \"Authorization: Bearer fc4004ca87c1a594af0f8484f1c68d17c95af77c30b9a4c40ebe2dc6d58dae14\")",
+      "Bash(ls:*)",
+      "Bash(grep:*)",
+      "Bash(log show:*)",
+      "Bash(md5:*)",
+      "Bash(chmod:*)",
+      "Bash(./obsidian-launcher.sh restart:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(touch:*)",
+      "Bash(rm:*)",
+      "Bash(echo:*)",
+      "Bash(ln:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(./obsidian-launcher-verbose.sh restart:*)",
+      "Bash(npm test)",
+      "Bash(curl:*)",
+      "Bash(jq:*)"
+    ],
+    "deny": []
+  }
+}

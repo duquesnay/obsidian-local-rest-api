@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./test-api.sh:*)",
+      "Bash(mv:*)",
+      "Bash(./test-rename.sh)",
+      "Bash(./test-simple-rename.sh:*)",
+      "Bash(./test-vault.sh:*)",
+      "Bash(./test-rename-patch.sh:*)",
+      "Bash(./test-rename-errors.sh:*)",
+      "Bash(./cleanup-test-files.sh:*)",
+      "Bash(mkdir:*)",
+      "Bash(npm test:*)",
+      "Bash(../../scripts/agent-tests/test-append.sh:*)",
+      "Bash(npm test:*)"
+    ],
+    "deny": []
+  }
+}
