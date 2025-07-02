@@ -2086,6 +2086,394 @@ export default class RequestHandler {
     return Boolean(value);
   }
 
+  async searchAdvancedPost(
+    req: express.Request,
+    res: express.Response
+  ): Promise<void> {
+    interface AdvancedSearchQuery {
+      // Content search
+      content?: {
+        query?: string;           // Simple text search
+        regex?: string;           // Regex pattern
+        caseSensitive?: boolean;  // Case sensitivity for searches
+      };
+      // Frontmatter filters
+      frontmatter?: Record<string, any>; // Frontmatter field queries
+      // File metadata filters
+      metadata?: {
+        path?: string;            // Path glob pattern
+        extension?: string;       // File extension filter
+        sizeMin?: number;         // Minimum file size in bytes
+        sizeMax?: number;         // Maximum file size in bytes
+        createdAfter?: string;    // ISO date string
+        createdBefore?: string;   // ISO date string
+        modifiedAfter?: string;   // ISO date string
+        modifiedBefore?: string;  // ISO date string
+      };
+      // Tag filters
+      tags?: {
+        include?: string[];       // Must have all these tags
+        exclude?: string[];       // Must not have any of these tags
+        any?: string[];          // Must have at least one of these tags
+      };
+      // Pagination
+      pagination?: {
+        page?: number;           // Page number (0-based)
+        limit?: number;          // Results per page (default 50, max 200)
+      };
+      // Options
+      options?: {
+        contextLength?: number;  // Context length for matches (default 100)
+        includeContent?: boolean; // Include full content in results
+        sortBy?: 'score' | 'path' | 'modified' | 'created' | 'size';
+        sortOrder?: 'asc' | 'desc';
+      };
+    }
+
+    try {
+      const query = req.body as AdvancedSearchQuery;
+      const results: Array<any> = [];
+      
+      // Validate regex early if provided
+      if (query.content?.regex) {
+        try {
+          new RegExp(query.content.regex);
+        } catch (e) {
+          res.status(400).json({
+            errorCode: 40009,
+            message: `Invalid regex pattern: ${e.message}`
+          });
+          return;
+        }
+      }
+      
+      // Pagination defaults
+      const page = query.pagination?.page ?? 0;
+      const limit = Math.min(query.pagination?.limit ?? 50, 200);
+      const contextLength = query.options?.contextLength ?? 100;
+      
+      // Process each file
+      for (const file of this.app.vault.getMarkdownFiles()) {
+        let matches = true;
+        const fileResult: any = {
+          path: file.path,
+          matches: []
+        };
+        
+        // Content search
+        if (query.content) {
+          const content = await this.app.vault.cachedRead(file);
+          let contentMatches = false;
+          
+          if (query.content.query) {
+            // Simple text search
+            if (query.content.caseSensitive === false) {
+              // Case insensitive search
+              const searchQuery = query.content.query.toLowerCase();
+              const contentLower = content.toLowerCase();
+              let index = contentLower.indexOf(searchQuery);
+              
+              while (index !== -1) {
+                contentMatches = true;
+                fileResult.matches.push({
+                  type: 'text',
+                  match: { start: index, end: index + query.content.query.length },
+                  context: content.slice(
+                    Math.max(index - contextLength, 0),
+                    index + query.content.query.length + contextLength
+                  )
+                });
+                index = contentLower.indexOf(searchQuery, index + 1);
+              }
+            } else {
+              // Use Obsidian's search function (case sensitive by default)
+              const searchFunc = prepareSimpleSearch(query.content.query);
+              const result = searchFunc(content);
+              if (result) {
+                contentMatches = true;
+                fileResult.score = result.score;
+                for (const match of result.matches) {
+                  fileResult.matches.push({
+                    type: 'text',
+                    match: { start: match[0], end: match[1] },
+                    context: content.slice(
+                      Math.max(match[0] - contextLength, 0),
+                      match[1] + contextLength
+                    )
+                  });
+                }
+              }
+            }
+          }
+          
+          if (query.content.regex) {
+            // Regex search
+            try {
+              const flags = query.content.caseSensitive ? 'g' : 'gi';
+              const regex = new RegExp(query.content.regex, flags);
+              let match;
+              while ((match = regex.exec(content)) !== null) {
+                contentMatches = true;
+                fileResult.matches.push({
+                  type: 'regex',
+                  match: { start: match.index, end: match.index + match[0].length },
+                  context: content.slice(
+                    Math.max(match.index - contextLength, 0),
+                    match.index + match[0].length + contextLength
+                  )
+                });
+              }
+            } catch (e) {
+              res.status(400).json({
+                errorCode: 40009,
+                message: `Invalid regex pattern: ${e.message}`
+              });
+              return;
+            }
+          }
+          
+          if (!contentMatches) {
+            matches = false;
+          }
+        }
+        
+        // Frontmatter filters
+        if (query.frontmatter && matches) {
+          const cache = this.app.metadataCache.getFileCache(file);
+          const frontmatter = cache?.frontmatter || {};
+          
+          // Check each frontmatter condition
+          for (const [field, expectedValue] of Object.entries(query.frontmatter)) {
+            const actualValue = frontmatter[field];
+            
+            // Handle special comparison operators
+            if (expectedValue && typeof expectedValue === 'object' && expectedValue.contains) {
+              // Array contains check
+              if (!Array.isArray(actualValue) || !actualValue.includes(expectedValue.contains)) {
+                matches = false;
+                break;
+              }
+            } else {
+              // Use json-logic for direct comparisons
+              const result = jsonLogic.apply(
+                { "==": [{ var: "actual" }, { var: "expected" }] },
+                { actual: actualValue, expected: expectedValue }
+              );
+              
+              if (!result) {
+                matches = false;
+                break;
+              }
+            }
+          }
+        }
+        
+        // File metadata filters
+        if (query.metadata && matches) {
+          // Path filter
+          if (query.metadata.path) {
+            const pathRegex = WildcardRegexp(query.metadata.path);
+            if (!pathRegex.test(file.path)) {
+              matches = false;
+            }
+          }
+          
+          // Extension filter
+          if (query.metadata.extension && matches) {
+            if (!file.path.endsWith(query.metadata.extension)) {
+              matches = false;
+            }
+          }
+          
+          // Size filters
+          if ((query.metadata.sizeMin !== undefined || query.metadata.sizeMax !== undefined) && matches) {
+            const stat = file.stat;
+            if (query.metadata.sizeMin !== undefined && stat.size < query.metadata.sizeMin) {
+              matches = false;
+            }
+            if (query.metadata.sizeMax !== undefined && stat.size > query.metadata.sizeMax) {
+              matches = false;
+            }
+          }
+          
+          // Date filters
+          if (matches) {
+            const stat = file.stat;
+            
+            if (query.metadata.createdAfter) {
+              const afterDate = new Date(query.metadata.createdAfter).getTime();
+              if (stat.ctime < afterDate) matches = false;
+            }
+            
+            if (query.metadata.createdBefore) {
+              const beforeDate = new Date(query.metadata.createdBefore).getTime();
+              if (stat.ctime > beforeDate) matches = false;
+            }
+            
+            if (query.metadata.modifiedAfter) {
+              const afterDate = new Date(query.metadata.modifiedAfter).getTime();
+              if (stat.mtime < afterDate) matches = false;
+            }
+            
+            if (query.metadata.modifiedBefore) {
+              const beforeDate = new Date(query.metadata.modifiedBefore).getTime();
+              if (stat.mtime > beforeDate) matches = false;
+            }
+          }
+        }
+        
+        // Tag filters
+        if (query.tags && matches) {
+          const cache = this.app.metadataCache.getFileCache(file);
+          const fileTags = new Set<string>();
+          
+          // Collect all tags
+          if (cache?.tags) {
+            for (const tag of cache.tags) {
+              fileTags.add(tag.tag.replace(/^#/, ''));
+            }
+          }
+          if (cache?.frontmatter?.tags && Array.isArray(cache.frontmatter.tags)) {
+            for (const tag of cache.frontmatter.tags) {
+              fileTags.add(tag.toString());
+            }
+          }
+          
+          // Check include tags (must have all)
+          if (query.tags.include) {
+            for (const tag of query.tags.include) {
+              if (!fileTags.has(tag)) {
+                matches = false;
+                break;
+              }
+            }
+          }
+          
+          // Check exclude tags (must not have any)
+          if (query.tags.exclude && matches) {
+            for (const tag of query.tags.exclude) {
+              if (fileTags.has(tag)) {
+                matches = false;
+                break;
+              }
+            }
+          }
+          
+          // Check any tags (must have at least one)
+          if (query.tags.any && matches) {
+            let hasAny = false;
+            for (const tag of query.tags.any) {
+              if (fileTags.has(tag)) {
+                hasAny = true;
+                break;
+              }
+            }
+            if (!hasAny) matches = false;
+          }
+        }
+        
+        // Add to results if matches
+        if (matches) {
+          // Add file metadata
+          fileResult.metadata = {
+            size: file.stat.size,
+            created: file.stat.ctime,
+            modified: file.stat.mtime
+          };
+          
+          // Add frontmatter if requested
+          const cache = this.app.metadataCache.getFileCache(file);
+          if (cache?.frontmatter) {
+            fileResult.frontmatter = cache.frontmatter;
+          }
+          
+          // Add tags
+          const tags = new Set<string>();
+          if (cache?.tags) {
+            for (const tag of cache.tags) {
+              tags.add(tag.tag.replace(/^#/, ''));
+            }
+          }
+          if (cache?.frontmatter?.tags && Array.isArray(cache.frontmatter.tags)) {
+            for (const tag of cache.frontmatter.tags) {
+              tags.add(tag.toString());
+            }
+          }
+          if (tags.size > 0) {
+            fileResult.tags = Array.from(tags);
+          }
+          
+          // Add content if requested
+          if (query.options?.includeContent) {
+            fileResult.content = await this.app.vault.cachedRead(file);
+          }
+          
+          // Add context from first match if available
+          if (fileResult.matches.length > 0) {
+            fileResult.context = fileResult.matches[0].context;
+          }
+          
+          results.push(fileResult);
+        }
+      }
+      
+      // Sort results
+      const sortBy = query.options?.sortBy ?? 'score';
+      const sortOrder = query.options?.sortOrder ?? 'desc';
+      
+      results.sort((a, b) => {
+        let comparison = 0;
+        
+        switch (sortBy) {
+          case 'score':
+            comparison = (a.score ?? 0) - (b.score ?? 0);
+            break;
+          case 'path':
+            comparison = a.path.localeCompare(b.path);
+            break;
+          case 'modified':
+            comparison = a.metadata.modified - b.metadata.modified;
+            break;
+          case 'created':
+            comparison = a.metadata.created - b.metadata.created;
+            break;
+          case 'size':
+            comparison = a.metadata.size - b.metadata.size;
+            break;
+        }
+        
+        return sortOrder === 'asc' ? comparison : -comparison;
+      });
+      
+      // Apply pagination
+      const totalResults = results.length;
+      const totalPages = Math.ceil(totalResults / limit);
+      const paginatedResults = results.slice(page * limit, (page + 1) * limit);
+      
+      res.json({
+        results: paginatedResults,
+        total: totalResults,
+        page,
+        limit,
+        totalPages,
+        pagination: {
+          page,
+          limit,
+          totalResults,
+          totalPages,
+          hasNext: page < totalPages - 1,
+          hasPrevious: page > 0
+        }
+      });
+      
+    } catch (error) {
+      this.returnCannedResponse(res, {
+        errorCode: ErrorCode.InvalidFilterQuery,
+        message: error.message
+      });
+    }
+  }
+
   async searchQueryPost(
     req: express.Request,
     res: express.Response
@@ -2321,6 +2709,7 @@ export default class RequestHandler {
 
     this.api.route("/search/").post(this.searchQueryPost.bind(this));
     this.api.route("/search/simple/").post(this.searchSimplePost.bind(this));
+    this.api.route("/search/advanced/").post(this.searchAdvancedPost.bind(this));
 
     this.api.route("/tags/").get(this.tagsGet.bind(this));
     this.api.route("/tags/:tagname/").get(this.tagGet.bind(this)).patch(this.tagPatch.bind(this));
