@@ -177,10 +177,11 @@ curl -k https://127.0.0.1:27124/commands/
   - DELETE `/vault/{path}` with `Target-Type: directory`
   - Two modes: trash (default) vs permanent deletion (`Permanent: true`)
   - Recursive deletion with safety checks and proper cleanup
-- [ ] Copy Directory - MEDIUM PRIORITY
-  - PATCH `/vault/{path}` with `Operation: copy`, `Target-Type: directory`
-  - Preserve source, duplicate to destination
-  - Handle link updates in copied files
+- [x] Copy Directory - COMPLETED
+  - POST `/vault/{destination}` with `Operation: copy`, `Target-Type: directory`  
+  - Source path provided in request body
+  - Preserves source directory, creates full duplicate
+  - File-by-file copy maintains content integrity
 - [ ] Directory Metadata - LOW PRIORITY
   - GET `/vault/{path}` with enhanced directory information
   - File counts, size totals, modification dates
