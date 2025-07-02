@@ -1929,4 +1929,436 @@ describe("requestHandler", () => {
       });
     });
   });
+
+  describe("advanced search operations", () => {
+    describe("POST /search/advanced", () => {
+      beforeEach(() => {
+        // Set up test files with various properties
+        const file1 = new TFile();
+        file1.path = "projects/project1.md";
+        file1.stat.ctime = 1609459200000; // 2021-01-01
+        file1.stat.mtime = 1609545600000; // 2021-01-02
+        file1.stat.size = 1024;
+        
+        const file2 = new TFile();
+        file2.path = "notes/meeting.md";
+        file2.stat.ctime = 1609632000000; // 2021-01-03
+        file2.stat.mtime = 1609718400000; // 2021-01-04
+        file2.stat.size = 2048;
+        
+        const file3 = new TFile();
+        file3.path = "archive/old-note.txt";
+        file3.stat.ctime = 1577836800000; // 2020-01-01
+        file3.stat.mtime = 1577923200000; // 2020-01-02
+        file3.stat.size = 512;
+        
+        app.vault._files = [file1, file2, file3];
+        app.vault._markdownFiles = [file1, file2]; // Only markdown files
+        
+        // Set up file contents
+        app.vault._readMap = {
+          "projects/project1.md": "# Project Alpha\nThis is a project about testing advanced search.\n#project #important",
+          "notes/meeting.md": "# Team Meeting\nDiscussed search functionality and regex patterns.\n#meeting #todo",
+          "archive/old-note.txt": "Legacy content from 2020."
+        };
+        
+        // Set up metadata cache
+        const cache1 = new CachedMetadata();
+        cache1.tags = [{ tag: "#project" }, { tag: "#important" }];
+        cache1.frontmatter = { status: "active", priority: "high" };
+        
+        const cache2 = new CachedMetadata();
+        cache2.tags = [{ tag: "#meeting" }, { tag: "#todo" }];
+        cache2.frontmatter = { type: "meeting", attendees: ["Alice", "Bob"] };
+        
+        const cache3 = new CachedMetadata();
+        cache3.tags = [];
+        
+        app.metadataCache._fileCacheMap = {
+          "projects/project1.md": cache1,
+          "notes/meeting.md": cache2,
+          "archive/old-note.txt": cache3
+        };
+      });
+
+      test("basic content search", async () => {
+        const query = {
+          content: {
+            query: "search functionality"
+          }
+        };
+        
+        const response = await request(server)
+          .post("/search/advanced/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(200);
+          
+        expect(response.body.results).toHaveLength(1);
+        expect(response.body.results[0].path).toEqual("notes/meeting.md");
+        expect(response.body.total).toEqual(1);
+      });
+
+      test("regex content search", async () => {
+        const query = {
+          content: {
+            regex: "Project \\w+",
+            caseSensitive: true
+          }
+        };
+        
+        const response = await request(server)
+          .post("/search/advanced/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(200);
+          
+        expect(response.body.results).toHaveLength(1);
+        expect(response.body.results[0].path).toEqual("projects/project1.md");
+      });
+
+      test("frontmatter field search", async () => {
+        const query = {
+          frontmatter: {
+            status: "active"
+          }
+        };
+        
+        const response = await request(server)
+          .post("/search/advanced/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(200);
+          
+        expect(response.body.results).toHaveLength(1);
+        expect(response.body.results[0].path).toEqual("projects/project1.md");
+      });
+
+      test("metadata path pattern search", async () => {
+        const query = {
+          metadata: {
+            path: "notes/*"
+          }
+        };
+        
+        const response = await request(server)
+          .post("/search/advanced/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(200);
+          
+        expect(response.body.results).toHaveLength(1);
+        expect(response.body.results[0].path).toEqual("notes/meeting.md");
+      });
+
+      test("metadata size range search", async () => {
+        const query = {
+          metadata: {
+            sizeMin: 1000,
+            sizeMax: 1500
+          }
+        };
+        
+        const response = await request(server)
+          .post("/search/advanced/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(200);
+          
+        expect(response.body.results).toHaveLength(1);
+        expect(response.body.results[0].path).toEqual("projects/project1.md");
+      });
+
+      test("metadata date range search", async () => {
+        const query = {
+          metadata: {
+            createdAfter: "2021-01-01",
+            modifiedBefore: "2021-01-03"
+          }
+        };
+        
+        const response = await request(server)
+          .post("/search/advanced/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(200);
+          
+        expect(response.body.results).toHaveLength(1);
+        expect(response.body.results[0].path).toEqual("projects/project1.md");
+      });
+
+      test("tag include filter", async () => {
+        const query = {
+          tags: {
+            include: ["project", "important"]
+          }
+        };
+        
+        const response = await request(server)
+          .post("/search/advanced/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(200);
+          
+        expect(response.body.results).toHaveLength(1);
+        expect(response.body.results[0].path).toEqual("projects/project1.md");
+      });
+
+      test("tag exclude filter", async () => {
+        const query = {
+          tags: {
+            exclude: ["todo"]
+          }
+        };
+        
+        const response = await request(server)
+          .post("/search/advanced/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(200);
+          
+        expect(response.body.results).toHaveLength(2);
+        const paths = response.body.results.map((r: any) => r.path);
+        expect(paths).toContain("projects/project1.md");
+        expect(paths).toContain("archive/old-note.txt");
+      });
+
+      test("tag any filter", async () => {
+        const query = {
+          tags: {
+            any: ["project", "meeting"]
+          }
+        };
+        
+        const response = await request(server)
+          .post("/search/advanced/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(200);
+          
+        expect(response.body.results).toHaveLength(2);
+        const paths = response.body.results.map((r: any) => r.path);
+        expect(paths).toContain("projects/project1.md");
+        expect(paths).toContain("notes/meeting.md");
+      });
+
+      test("combined filters", async () => {
+        const query = {
+          content: {
+            query: "project"
+          },
+          metadata: {
+            extension: "md"
+          },
+          tags: {
+            include: ["important"]
+          }
+        };
+        
+        const response = await request(server)
+          .post("/search/advanced/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(200);
+          
+        expect(response.body.results).toHaveLength(1);
+        expect(response.body.results[0].path).toEqual("projects/project1.md");
+      });
+
+      test("pagination", async () => {
+        const query = {
+          pagination: {
+            page: 1,
+            limit: 2
+          }
+        };
+        
+        const response = await request(server)
+          .post("/search/advanced/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(200);
+          
+        expect(response.body.results).toHaveLength(2);
+        expect(response.body.total).toEqual(3);
+        expect(response.body.page).toEqual(1);
+        expect(response.body.limit).toEqual(2);
+        expect(response.body.totalPages).toEqual(2);
+      });
+
+      test("sorting by modified date descending", async () => {
+        const query = {
+          options: {
+            sortBy: "modified",
+            sortOrder: "desc"
+          }
+        };
+        
+        const response = await request(server)
+          .post("/search/advanced/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(200);
+          
+        expect(response.body.results).toHaveLength(2); // Only markdown files
+        expect(response.body.results[0].path).toEqual("notes/meeting.md");
+        expect(response.body.results[1].path).toEqual("projects/project1.md");
+      });
+
+      test("context length option", async () => {
+        const query = {
+          content: {
+            query: "search"
+          },
+          options: {
+            contextLength: 20
+          }
+        };
+        
+        const response = await request(server)
+          .post("/search/advanced/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(200);
+          
+        expect(response.body.results).toHaveLength(2); // Both files contain "search"
+        expect(response.body.results[0].context).toBeDefined();
+        expect(response.body.results[0].context.length).toBeLessThanOrEqual(60); // 20 chars before + match + 20 chars after
+      });
+
+      test("include content option", async () => {
+        const query = {
+          options: {
+            includeContent: true
+          },
+          pagination: {
+            limit: 1
+          }
+        };
+        
+        const response = await request(server)
+          .post("/search/advanced/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(200);
+          
+        expect(response.body.results[0].content).toBeDefined();
+        expect(response.body.results[0].content).toContain("Project Alpha");
+      });
+
+      test("empty query returns all files", async () => {
+        const query = {};
+        
+        const response = await request(server)
+          .post("/search/advanced/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(200);
+          
+        expect(response.body.results).toHaveLength(2); // Only markdown files
+        expect(response.body.total).toEqual(2);
+      });
+
+      test("no results found", async () => {
+        const query = {
+          content: {
+            query: "nonexistent content"
+          }
+        };
+        
+        const response = await request(server)
+          .post("/search/advanced/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(200);
+          
+        expect(response.body.results).toHaveLength(0);
+        expect(response.body.total).toEqual(0);
+      });
+
+      test("invalid regex pattern", async () => {
+        const query = {
+          content: {
+            regex: "[invalid regex"
+          }
+        };
+        
+        const response = await request(server)
+          .post("/search/advanced/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(400);
+          
+        expect(response.body.message).toContain("Invalid regex pattern");
+      });
+
+      test("unauthorized request", async () => {
+        const query = {
+          content: {
+            query: "test"
+          }
+        };
+        
+        await request(server)
+          .post("/search/advanced/")
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(401);
+      });
+
+      test("frontmatter array contains search", async () => {
+        const query = {
+          frontmatter: {
+            attendees: { contains: "Alice" }
+          }
+        };
+        
+        const response = await request(server)
+          .post("/search/advanced/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(200);
+          
+        expect(response.body.results).toHaveLength(1);
+        expect(response.body.results[0].path).toEqual("notes/meeting.md");
+      });
+
+      test("case insensitive content search", async () => {
+        const query = {
+          content: {
+            query: "SEARCH functionality",
+            caseSensitive: false
+          }
+        };
+        
+        const response = await request(server)
+          .post("/search/advanced/")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "application/json")
+          .send(query)
+          .expect(200);
+          
+        expect(response.body.results).toHaveLength(1);
+        expect(response.body.results[0].path).toEqual("notes/meeting.md");
+      });
+    });
+  });
 });
