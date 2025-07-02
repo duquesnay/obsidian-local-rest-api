@@ -162,6 +162,37 @@ curl -k https://127.0.0.1:27124/
 curl -k https://127.0.0.1:27124/commands/
 ```
 
+## Feature Backlog
+
+### Directory Operations (In Progress)
+- [x] Move Directory - COMPLETED
+  - PATCH `/vault/{path}` with `Operation: move`, `Target-Type: directory`, `Target: path`
+  - File-by-file approach preserves links, handles nested structures
+  - Atomic operations with rollback capability
+- [x] Create Directory - COMPLETED
+  - POST `/vault/{path}` with `Target-Type: directory`
+  - Support nested directory creation, conflict detection
+  - Validates paths and handles edge cases gracefully
+- [x] Delete Directory - COMPLETED
+  - DELETE `/vault/{path}` with `Target-Type: directory`
+  - Two modes: trash (default) vs permanent deletion (`Permanent: true`)
+  - Recursive deletion with safety checks and proper cleanup
+- [ ] Copy Directory - MEDIUM PRIORITY
+  - PATCH `/vault/{path}` with `Operation: copy`, `Target-Type: directory`
+  - Preserve source, duplicate to destination
+  - Handle link updates in copied files
+- [ ] Directory Metadata - LOW PRIORITY
+  - GET `/vault/{path}` with enhanced directory information
+  - File counts, size totals, modification dates
+  - Directory tree structure info
+
+### Future Enhancements
+- [ ] Bulk file operations across multiple directories
+- [ ] Directory watching/change events via WebSocket
+- [ ] Advanced filtering and search within directories
+- [ ] Directory templates and scaffolding
+- [ ] Import/export directory structures
+
 ## Project Learnings
 
 ### 2025-01-02 - File Operations Security Implementation

@@ -498,6 +498,15 @@ export default class RequestHandler {
     const target =
       targetType == "heading" ? rawTarget.split(targetDelimiter) : rawTarget;
 
+    // Validate operation/target-type combinations BEFORE checking file existence
+    if ((operation === "rename" || operation === "move") && !["file", "directory"].includes(targetType)) {
+      res.status(400).json({
+        errorCode: 40006,
+        message: `Operation '${operation}' is only valid for Target-Type: file or directory`
+      });
+      return;
+    }
+
     // Check for directory-level operations BEFORE file validation
     if (targetType === "directory") {
       if (operation === "move") {
@@ -552,15 +561,6 @@ export default class RequestHandler {
         }
         return this.handleRenameOperation(path, req, res);
       }
-    }
-    
-    // Validate that file-specific operations are only used with file target type
-    if ((operation === "rename" || operation === "move") && !["file", "directory"].includes(targetType)) {
-      res.status(400).json({
-        errorCode: 40006,
-        message: `Operation '${operation}' is only valid for Target-Type: file or directory`
-      });
-      return;
     }
     
     if (!["heading", "block", "frontmatter", "file", "directory"].includes(targetType)) {
@@ -691,9 +691,15 @@ export default class RequestHandler {
       req.path.slice(req.path.indexOf("/", 1) + 1)
     );
 
-    // Check for directory creation
+    // Check for directory operations
     const targetType = req.get("Target-Type");
+    const operation = req.get("Operation");
+    
     if (targetType === "directory") {
+      if (operation === "copy") {
+        return this.handleDirectoryCopyOperation(path, req, res);
+      }
+      // Default directory POST is create
       return this.handleDirectoryCreateOperation(path, req, res);
     }
 
@@ -1124,6 +1130,160 @@ export default class RequestHandler {
       res.status(500).json({
         errorCode: 50001,
         message: `Failed to delete directory: ${error.message}`
+      });
+    }
+  }
+
+  async handleDirectoryCopyOperation(
+    destinationPath: string,
+    req: express.Request,
+    res: express.Response
+  ): Promise<void> {
+    if (!destinationPath) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "Destination path is required"
+      });
+      return;
+    }
+
+    // Source path should be in the request body
+    const sourcePath = typeof req.body === 'string' ? req.body.trim() : '';
+    
+    if (!sourcePath) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "Source path is required in request body"
+      });
+      return;
+    }
+
+    try {
+      // Check if source directory exists
+      const sourceExists = await this.app.vault.adapter.exists(sourcePath);
+      if (!sourceExists) {
+        res.status(404).json({
+          errorCode: 40401,
+          message: `Source directory not found: ${sourcePath}`
+        });
+        return;
+      }
+
+      // Check if source is actually a directory
+      const sourceStat = await this.app.vault.adapter.stat(sourcePath);
+      if (sourceStat.type !== 'folder') {
+        res.status(400).json({
+          errorCode: 40004,
+          message: `Source is not a directory: ${sourcePath}`
+        });
+        return;
+      }
+
+      // Check if destination already exists
+      const destExists = await this.app.vault.adapter.exists(destinationPath);
+      if (destExists) {
+        res.status(409).json({
+          errorCode: 40901,
+          message: `Destination already exists: ${destinationPath}`
+        });
+        return;
+      }
+
+      // Get all files in the source directory recursively
+      const allFiles = this.app.vault.getFiles();
+      const sourceFiles = allFiles.filter(file => file.path.startsWith(sourcePath + '/'));
+      
+      if (sourceFiles.length === 0) {
+        // Empty directory - just create the destination
+        try {
+          await this.app.vault.createFolder(destinationPath);
+        } catch (error) {
+          // Folder might already exist or parent doesn't exist
+          res.status(500).json({
+            errorCode: 50001,
+            message: `Failed to create destination directory: ${error.message}`
+          });
+          return;
+        }
+        
+        res.status(201).json({
+          message: "Empty directory copied successfully",
+          source: sourcePath,
+          destination: destinationPath,
+          copiedFilesCount: 0
+        });
+        return;
+      }
+
+      // Copy files one by one to the new location
+      const copiedFiles: Array<{source: string, destination: string}> = [];
+      
+      try {
+        // Create destination directory first
+        await this.app.vault.createFolder(destinationPath);
+        
+        for (const file of sourceFiles) {
+          // Calculate relative path from source directory
+          const relativePath = file.path.substring(sourcePath.length + 1);
+          const newPath = `${destinationPath}/${relativePath}`;
+          
+          // Create parent directories if needed
+          const parentDir = newPath.substring(0, newPath.lastIndexOf('/'));
+          if (parentDir && parentDir !== destinationPath) {
+            try {
+              await this.app.vault.createFolder(parentDir);
+            } catch {
+              // Directory might already exist
+            }
+          }
+          
+          // Read content from source file
+          const content = await this.app.vault.read(file);
+          
+          // Write to destination
+          await this.app.vault.adapter.write(newPath, content);
+          
+          copiedFiles.push({
+            source: file.path,
+            destination: newPath
+          });
+        }
+        
+        res.status(201).json({
+          message: "Directory copied successfully",
+          source: sourcePath,
+          destination: destinationPath,
+          copiedFilesCount: copiedFiles.length,
+          copiedFiles: copiedFiles
+        });
+        
+      } catch (error) {
+        // Attempt to clean up any partially copied files
+        for (const copied of copiedFiles) {
+          try {
+            await this.app.vault.adapter.remove(copied.destination);
+          } catch (cleanupError) {
+            console.error(`Failed to cleanup file ${copied.destination}:`, cleanupError);
+          }
+        }
+        
+        // Try to remove the destination directory if it was created
+        try {
+          await this.removeEmptyDirectoriesRecursively(destinationPath);
+        } catch (cleanupError) {
+          console.error(`Failed to cleanup directory ${destinationPath}:`, cleanupError);
+        }
+        
+        res.status(500).json({
+          errorCode: 50001,
+          message: `Failed to copy directory: ${error.message}`
+        });
+      }
+      
+    } catch (error) {
+      res.status(500).json({
+        errorCode: 50001,
+        message: `Failed to copy directory: ${error.message}`
       });
     }
   }
