@@ -164,7 +164,8 @@ curl -k https://127.0.0.1:27124/commands/
 
 ## Feature Backlog
 
-### Directory Operations (In Progress)
+### Directory Operations (Completed)
+All directory operations have been implemented:
 - [x] Move Directory - COMPLETED
   - PATCH `/vault/{path}` with `Operation: move`, `Target-Type: directory`, `Target: path`
   - File-by-file approach preserves links, handles nested structures
@@ -186,6 +187,42 @@ curl -k https://127.0.0.1:27124/commands/
   - GET `/vault/{path}` with enhanced directory information
   - File counts, size totals, modification dates
   - Directory tree structure info
+
+### Tag Operations (Completed)
+- [x] List All Tags - COMPLETED
+  - GET `/tags` - Returns all unique tags with usage counts
+  - Sorted by frequency then alphabetically
+  - Includes both inline (#tag) and frontmatter tags
+- [x] Get Files by Tag - COMPLETED  
+  - GET `/tags/{tagname}` - Lists files containing specific tag
+  - Supports nested tags (parent/child)
+  - Shows occurrence count per file
+- [x] Rename Tag - COMPLETED
+  - PATCH `/tags/{tagname}` with `Operation: rename`
+  - Renames tag across entire vault atomically
+  - Updates both inline and frontmatter tags
+- [x] Add/Remove Tags - COMPLETED
+  - PATCH `/vault/{filepath}` with `Target-Type: tag`, `Operation: add/remove`
+  - Add tags to frontmatter (preferred) or inline
+  - Remove tags from both locations
+
+### Enhanced Operations (To Do)
+- [ ] Advanced Content Search - HIGH PRIORITY
+  - Multi-criteria search with frontmatter queries
+  - Regex pattern matching support
+  - Date/size filters
+  - Pagination for large result sets
+- [ ] File Information Access - MEDIUM PRIORITY
+  - Content negotiation for metadata/stats
+  - GET with Accept headers for different representations
+  - Frontmatter-only access
+- [ ] Link Graph Operations - MEDIUM PRIORITY
+  - Backlinks and forward links
+  - Broken link detection
+  - Orphaned file detection
+- [ ] Batch Processing - LOW PRIORITY
+  - Atomic multi-operation execution
+  - Transaction support with rollback
 
 ### Future Enhancements
 - [ ] Bulk file operations across multiple directories
