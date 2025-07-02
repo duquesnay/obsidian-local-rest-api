@@ -448,6 +448,217 @@ describe("requestHandler", () => {
           expect(response.body.message).toEqual("Failed to create directory: Permission denied");
         });
       });
+
+      describe("copy directory", () => {
+        test("successful directory copy", async () => {
+          const sourcePath = "source-folder";
+          const destinationPath = "destination-folder";
+          
+          // Mock source exists, destination doesn't
+          let existsCallCount = 0;
+          app.vault.adapter.exists = jest.fn().mockImplementation((path) => {
+            existsCallCount++;
+            if (existsCallCount === 1) return Promise.resolve(true); // source exists
+            return Promise.resolve(false); // destination doesn't exist
+          });
+          
+          // Mock source is a directory
+          app.vault.adapter._stat.type = "folder";
+          
+          // Mock files in source directory
+          const file1 = new TFile();
+          file1.path = "source-folder/file1.md";
+          const file2 = new TFile();
+          file2.path = "source-folder/subfolder/file2.md";
+          
+          app.vault._files = [file1, file2];
+          app.vault._read = "file content";
+          
+          // Mock createFolder and write
+          app.vault.createFolder = jest.fn().mockResolvedValue(undefined);
+          app.vault.adapter.write = jest.fn().mockResolvedValue(undefined);
+          
+          const response = await request(server)
+            .post(`/vault/${destinationPath}`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Operation", "copy")
+            .set("Target-Type", "directory")
+            .set("Content-Type", "text/plain")
+            .send(sourcePath)
+            .expect(201);
+            
+          expect(response.body.message).toEqual("Directory copied successfully");
+          expect(response.body.source).toEqual(sourcePath);
+          expect(response.body.destination).toEqual(destinationPath);
+          expect(response.body.copiedFilesCount).toEqual(2);
+          expect(app.vault.adapter.write).toHaveBeenCalledWith("destination-folder/file1.md", "file content");
+          expect(app.vault.adapter.write).toHaveBeenCalledWith("destination-folder/subfolder/file2.md", "file content");
+        });
+
+        test("copy empty directory", async () => {
+          const sourcePath = "empty-source";
+          const destinationPath = "empty-destination";
+          
+          // Mock source exists, destination doesn't
+          let existsCallCount = 0;
+          app.vault.adapter.exists = jest.fn().mockImplementation((path) => {
+            existsCallCount++;
+            if (existsCallCount === 1) return Promise.resolve(true); // source exists
+            return Promise.resolve(false); // destination doesn't exist
+          });
+          
+          // Mock source is a directory
+          app.vault.adapter._stat.type = "folder";
+          
+          // No files in directory
+          app.vault._files = [];
+          
+          // Mock createFolder
+          app.vault.createFolder = jest.fn().mockResolvedValue(undefined);
+          
+          const response = await request(server)
+            .post(`/vault/${destinationPath}`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Operation", "copy")
+            .set("Target-Type", "directory")
+            .set("Content-Type", "text/plain")
+            .send(sourcePath)
+            .expect(201);
+            
+          expect(response.body.message).toEqual("Empty directory copied successfully");
+          expect(response.body.copiedFilesCount).toEqual(0);
+          expect(app.vault.createFolder).toHaveBeenCalledWith(destinationPath);
+        });
+
+        test("source directory not found", async () => {
+          const sourcePath = "non-existent";
+          const destinationPath = "destination";
+          
+          // Mock source doesn't exist
+          app.vault.adapter.exists = jest.fn().mockResolvedValue(false);
+          
+          const response = await request(server)
+            .post(`/vault/${destinationPath}`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Operation", "copy")
+            .set("Target-Type", "directory")
+            .set("Content-Type", "text/plain")
+            .send(sourcePath)
+            .expect(404);
+            
+          expect(response.body.message).toEqual(`Source directory not found: ${sourcePath}`);
+        });
+
+        test("source is not a directory", async () => {
+          const sourcePath = "file.md";
+          const destinationPath = "destination";
+          
+          // Mock source exists
+          app.vault.adapter.exists = jest.fn().mockResolvedValue(true);
+          
+          // Mock source is a file, not directory
+          app.vault.adapter._stat.type = "file";
+          
+          const response = await request(server)
+            .post(`/vault/${destinationPath}`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Operation", "copy")
+            .set("Target-Type", "directory")
+            .set("Content-Type", "text/plain")
+            .send(sourcePath)
+            .expect(400);
+            
+          expect(response.body.message).toEqual(`Source is not a directory: ${sourcePath}`);
+        });
+
+        test("destination already exists", async () => {
+          const sourcePath = "source";
+          const destinationPath = "existing-destination";
+          
+          // Mock both source and destination exist
+          app.vault.adapter.exists = jest.fn().mockResolvedValue(true);
+          
+          // Mock source is a directory
+          app.vault.adapter._stat.type = "folder";
+          
+          const response = await request(server)
+            .post(`/vault/${destinationPath}`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Operation", "copy")
+            .set("Target-Type", "directory")
+            .set("Content-Type", "text/plain")
+            .send(sourcePath)
+            .expect(409);
+            
+          expect(response.body.message).toEqual(`Destination already exists: ${destinationPath}`);
+        });
+
+        test("missing source path in body", async () => {
+          const destinationPath = "destination";
+          
+          const response = await request(server)
+            .post(`/vault/${destinationPath}`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Operation", "copy")
+            .set("Target-Type", "directory")
+            .set("Content-Type", "text/plain")
+            .send("") // Empty body
+            .expect(400);
+            
+          expect(response.body.message).toEqual("Source path is required in request body");
+        });
+
+        test("missing destination path", async () => {
+          const response = await request(server)
+            .post(`/vault/`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Operation", "copy")
+            .set("Target-Type", "directory")
+            .set("Content-Type", "text/plain")
+            .send("source-path")
+            .expect(400);
+            
+          expect(response.body.message).toEqual("Destination path is required");
+        });
+
+        test("copy operation fails during execution", async () => {
+          const sourcePath = "source";
+          const destinationPath = "destination";
+          
+          // Mock source exists, destination doesn't
+          let existsCallCount = 0;
+          app.vault.adapter.exists = jest.fn().mockImplementation((path) => {
+            existsCallCount++;
+            if (existsCallCount === 1) return Promise.resolve(true); // source exists
+            return Promise.resolve(false); // destination doesn't exist
+          });
+          
+          // Mock source is a directory
+          app.vault.adapter._stat.type = "folder";
+          
+          // Mock file in source
+          const file1 = new TFile();
+          file1.path = "source/file1.md";
+          app.vault._files = [file1];
+          app.vault._read = "content";
+          
+          // Mock createFolder succeeds but write fails
+          app.vault.createFolder = jest.fn().mockResolvedValue(undefined);
+          app.vault.adapter.write = jest.fn().mockRejectedValue(new Error("Write failed"));
+          app.vault.adapter.remove = jest.fn().mockResolvedValue(undefined);
+          
+          const response = await request(server)
+            .post(`/vault/${destinationPath}`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Operation", "copy")
+            .set("Target-Type", "directory")
+            .set("Content-Type", "text/plain")
+            .send(sourcePath)
+            .expect(500);
+            
+          expect(response.body.message).toEqual("Failed to copy directory: Write failed");
+        });
+      });
     });
   });
 
