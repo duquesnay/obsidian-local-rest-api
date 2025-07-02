@@ -320,15 +320,114 @@ export default class RequestHandler {
             (mimeType == ContentTypes.markdown ? "; charset=utf-8" : ""),
         });
 
-        if (req.headers.accept === ContentTypes.olrapiNoteJson) {
-          const file = this.app.vault.getAbstractFileByPath(path) as TFile;
+        const file = this.app.vault.getAbstractFileByPath(path) as TFile;
+        if (!file) {
+          this.returnCannedResponse(res, { statusCode: 404 });
+          return;
+        }
+
+        // Determine the desired format from Accept header or query parameter
+        const acceptHeader = req.headers.accept || "";
+        const formatParam = req.query.format as string;
+        
+        // Query parameter takes precedence over Accept header
+        let desiredFormat = "";
+        if (formatParam) {
+          switch (formatParam.toLowerCase()) {
+            case "metadata":
+              desiredFormat = ContentTypes.olrapiMetadataJson;
+              break;
+            case "frontmatter":
+              desiredFormat = ContentTypes.olrapiFrontmatterJson;
+              break;
+            case "plain":
+              desiredFormat = ContentTypes.plainText;
+              break;
+            case "html":
+              desiredFormat = ContentTypes.html;
+              break;
+            case "full":
+              desiredFormat = ContentTypes.olrapiNoteJson;
+              break;
+            default:
+              desiredFormat = "";
+          }
+        } else {
+          // Check Accept header for specific content types
+          if (acceptHeader.includes(ContentTypes.olrapiNoteJson)) {
+            desiredFormat = ContentTypes.olrapiNoteJson;
+          } else if (acceptHeader.includes(ContentTypes.olrapiMetadataJson)) {
+            desiredFormat = ContentTypes.olrapiMetadataJson;
+          } else if (acceptHeader.includes(ContentTypes.olrapiFrontmatterJson)) {
+            desiredFormat = ContentTypes.olrapiFrontmatterJson;
+          } else if (acceptHeader.includes(ContentTypes.plainText)) {
+            desiredFormat = ContentTypes.plainText;
+          } else if (acceptHeader.includes(ContentTypes.html)) {
+            desiredFormat = ContentTypes.html;
+          }
+        }
+
+        // Handle different content types
+        if (desiredFormat === ContentTypes.olrapiNoteJson) {
+          // Return full metadata object
           res.setHeader("Content-Type", ContentTypes.olrapiNoteJson);
           res.send(
             JSON.stringify(await this.getFileMetadataObject(file), null, 2)
           );
           return;
+        } else if (desiredFormat === ContentTypes.olrapiMetadataJson) {
+          // Return metadata only (no content)
+          const fullMetadata = await this.getFileMetadataObject(file);
+          const metadata = {
+            path: fullMetadata.path,
+            stat: fullMetadata.stat,
+            frontmatter: fullMetadata.frontmatter,
+            tags: fullMetadata.tags
+          };
+          res.setHeader("Content-Type", ContentTypes.olrapiMetadataJson);
+          res.send(JSON.stringify(metadata, null, 2));
+          return;
+        } else if (desiredFormat === ContentTypes.olrapiFrontmatterJson) {
+          // Return frontmatter only
+          const cache = this.app.metadataCache.getFileCache(file);
+          const frontmatter = cache?.frontmatter || {};
+          res.setHeader("Content-Type", ContentTypes.olrapiFrontmatterJson);
+          res.send(JSON.stringify(frontmatter, null, 2));
+          return;
+        } else if (path.endsWith(".md") && (desiredFormat === ContentTypes.plainText || desiredFormat === ContentTypes.html)) {
+          // For markdown files, handle text/plain and text/html
+          const fileContent = await this.app.vault.read(file);
+          
+          if (desiredFormat === ContentTypes.plainText) {
+            // Remove frontmatter for plain text
+            const contentWithoutFrontmatter = fileContent.replace(/^---\n[\s\S]*?\n---\n/, "");
+            res.setHeader("Content-Type", ContentTypes.plainText + "; charset=utf-8");
+            res.send(contentWithoutFrontmatter);
+            return;
+          } else if (desiredFormat === ContentTypes.html) {
+            // Convert markdown to HTML (basic conversion)
+            const contentWithoutFrontmatter = fileContent.replace(/^---\n[\s\S]*?\n---\n/, "");
+            let html = contentWithoutFrontmatter
+              // Headers
+              .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+              .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+              .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+              // Bold
+              .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+              // Italic
+              .replace(/\*(.+?)\*/g, '<em>$1</em>')
+              // Links
+              .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+              // Line breaks
+              .split('\n\n').map((para: string) => para.trim() ? `<p>${para}</p>` : '').join('\n');
+            
+            res.setHeader("Content-Type", ContentTypes.html + "; charset=utf-8");
+            res.send(html);
+            return;
+          }
         }
 
+        // Default behavior: return raw file content
         res.send(Buffer.from(content));
       } else {
         this.returnCannedResponse(res, {
