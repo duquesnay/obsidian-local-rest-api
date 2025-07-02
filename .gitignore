@@ -24,6 +24,14 @@ data.json
 
 # Development scripts and tools
 scripts/
+test-*.sh
+cleanup-*.sh
+dev-watch.sh
+obsidian-launcher*.sh
+reload-*.js
+force-reload.js
+aggressive-reload.js
+test-hot-reload.js
 
 # Temporary files
 *.log
@@ -31,3 +39,10 @@ scripts/
 # Development documentation
 docs/dev/
 .worktrees/
+AGENT_TASK.md
+HOT-RELOAD-ANALYSIS.md
+RELOAD-INSTRUCTIONS.md
+SCRATCHPAD.md
+SPIKE-*.md
+fix-hot-reload.md
+hot-reload-fix.md
