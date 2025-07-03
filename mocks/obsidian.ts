@@ -93,7 +93,17 @@ export class Vault {
     return this._markdownFiles;
   }
 
-  getAbstractFileByPath(path: string): TFile {
+  getAbstractFileByPath(path: string): TFile | null {
+    // Look for a file with the exact path in our files array
+    const foundFile = this._files.find(file => file.path === path);
+    if (foundFile) {
+      return foundFile;
+    }
+    // If null is set, return null (for testing "file not found")
+    if (this._getAbstractFileByPath === null) {
+      return null;
+    }
+    // Otherwise return the default file
     return this._getAbstractFileByPath;
   }
 }
@@ -113,10 +123,18 @@ export class HeadingCache {
   position = new Pos();
 }
 
+export class LinkCache {
+  link = "";
+  original = "";
+  displayText?: string;
+  position = new Pos();
+}
+
 export class CachedMetadata {
   headings: HeadingCache[] = [];
   frontmatter: Record<string, unknown> = {};
   tags: { tag: string }[] = [];
+  links: LinkCache[] = [];
 }
 
 export class MetadataCache {
