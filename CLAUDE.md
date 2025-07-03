@@ -251,6 +251,10 @@ All directory operations have been implemented:
 **Technical:**
 - Test framework response body issue: During Phase 4 implementation, discovered that one specific test case ("invalid links parameter") receives an empty response body `{}` despite the server correctly returning a 400 error with proper error message. Debug logging confirmed the feature works correctly - `returnCannedResponse` is called with the right message, but `supertest` receives empty body. Other similar tests using `expect(response.body.message).toContain()` work fine. Split the test to check status code only and added TODO for investigating the test framework issue.
 
+### 2025-01-03 - Granular Commit Strategy for Large Features
+**Methodological:**
+- Incremental commit approach: When implementing large features with multiple components (helpers, endpoints, routes, tests), save the complete implementation to a temporary file first. Then reset the working directory and apply changes in logical chunks: (1) test infrastructure/mocks, (2) helper methods, (3) endpoint enhancements, (4) new endpoints, (5) route registration, (6) tests, (7) documentation. This creates a reviewable history where each commit is focused and could be reverted independently. Much better than one monolithic commit that mixes concerns.
+
 ### 2025-01-02 - Directory Move Operation Implementation
 **Methodological:**
 - Research-driven implementation validation: When the user questioned "isn't there some obsidian api operation capable of doing it?", conducting web research to understand how Obsidian actually handles folder moves internally proved crucial. This research revealed that native `FileManager.renameFile()` with `TFolder` only moves the folder container, not contents, validating our file-by-file approach as the correct solution that mirrors Obsidian's own internal behavior.
