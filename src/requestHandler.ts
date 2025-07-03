@@ -3048,6 +3048,10 @@ export default class RequestHandler {
     this.api.route("/tags/").get(this.tagsGet.bind(this));
     this.api.route("/tags/:tagname/").get(this.tagGet.bind(this)).patch(this.tagPatch.bind(this));
 
+    this.api.route("/links/").get(this.linksGet.bind(this));
+    this.api.route("/links/broken/").get(this.linksBrokenGet.bind(this));
+    this.api.route("/links/orphaned/").get(this.linksOrphanedGet.bind(this));
+
     this.api.route("/open/*").post(this.openPost.bind(this));
 
     this.api.get(`/${CERT_NAME}`, this.certificateGet.bind(this));
