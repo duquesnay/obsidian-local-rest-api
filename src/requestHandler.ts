@@ -2185,6 +2185,60 @@ export default class RequestHandler {
     return Boolean(value);
   }
 
+  async getOutgoingLinks(file: TFile): Promise<any[]> {
+    const cache = this.app.metadataCache.getFileCache(file);
+    const links = cache?.links || [];
+    
+    return links.map(link => ({
+      target: link.link,
+      original: link.original,
+      displayText: link.displayText || link.link,
+      position: link.position
+    }));
+  }
+
+  async getIncomingLinks(targetFile: TFile): Promise<any[]> {
+    const incomingLinks: any[] = [];
+    
+    // Search through all files to find links to this file
+    for (const file of this.app.vault.getMarkdownFiles()) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      const links = cache?.links || [];
+      
+      for (const link of links) {
+        // Check if this link points to our target file
+        if (this.resolveLinkTarget(link.link, file.path) === targetFile.path) {
+          incomingLinks.push({
+            source: file.path,
+            original: link.original,
+            displayText: link.displayText || link.link,
+            position: link.position
+          });
+        }
+      }
+    }
+    
+    return incomingLinks;
+  }
+
+  resolveLinkTarget(linkText: string, sourcePath: string): string {
+    // Simple link resolution - in a real implementation this would be more sophisticated
+    // Handle relative paths, aliases, etc.
+    
+    // If link contains path separator, treat as relative to vault root
+    if (linkText.includes('/')) {
+      return linkText + '.md';
+    }
+    
+    // If link is just a filename, look for it in the same directory as source
+    const sourceDir = sourcePath.substring(0, sourcePath.lastIndexOf('/'));
+    if (sourceDir) {
+      return sourceDir + '/' + linkText + '.md';
+    }
+    
+    return linkText + '.md';
+  }
+
   async searchAdvancedPost(
     req: express.Request,
     res: express.Response
