@@ -12,7 +12,10 @@
       "Bash(mkdir:*)",
       "Bash(npm test:*)",
       "Bash(../../scripts/agent-tests/test-append.sh:*)",
-      "Bash(npm test:*)"
+      "Bash(npm test:*)",
+      "Bash(rg:*)",
+      "Bash(node:*)",
+      "Bash(./scripts/test/test-invalid-links-param.sh:*)"
     ],
     "deny": []
   }
