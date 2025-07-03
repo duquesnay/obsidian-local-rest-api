@@ -430,6 +430,34 @@ export default class RequestHandler {
           }
         }
 
+        // Handle links query parameter
+        const linksParam = req.query.links as string;
+        if (linksParam) {
+          const validParams = ['outgoing', 'incoming', 'both'];
+          if (!validParams.includes(linksParam)) {
+            return this.returnCannedResponse(res, {
+              statusCode: 400,
+              message: `Invalid links parameter. Valid values: ${validParams.join(', ')}`
+            });
+          }
+
+          const result: any = {
+            path: file.path
+          };
+
+          if (linksParam === 'outgoing' || linksParam === 'both') {
+            result.outgoingLinks = await this.getOutgoingLinks(file);
+          }
+
+          if (linksParam === 'incoming' || linksParam === 'both') {
+            result.incomingLinks = await this.getIncomingLinks(file);
+          }
+
+          res.setHeader("Content-Type", "application/json");
+          res.send(JSON.stringify(result, null, 2));
+          return;
+        }
+
         // Default behavior: return raw file content
         res.send(Buffer.from(content));
       } else {
