@@ -2321,6 +2321,159 @@ export default class RequestHandler {
     return linkText + '.md';
   }
 
+  async linksGet(req: express.Request, res: express.Response): Promise<void> {
+    try {
+      const allLinks: any[] = [];
+      const files = this.app.vault.getMarkdownFiles();
+      let filesWithLinks = 0;
+      let totalLinks = 0;
+      
+      // Collect all links from all files
+      for (const file of files) {
+        const cache = this.app.metadataCache.getFileCache(file);
+        const links = cache?.links || [];
+        
+        if (links.length > 0) {
+          filesWithLinks++;
+          totalLinks += links.length;
+          
+          for (const link of links) {
+            allLinks.push({
+              source: file.path,
+              target: link.link,
+              original: link.original,
+              displayText: link.displayText || link.link,
+              position: link.position
+            });
+          }
+        }
+      }
+      
+      // Calculate orphaned files (files with no incoming links)
+      const allTargets = new Set(allLinks.map(link => this.resolveLinkTarget(link.target, link.source)));
+      const orphanedFiles = files.filter(file => !allTargets.has(file.path)).length;
+      
+      res.json({
+        links: allLinks,
+        statistics: {
+          totalLinks,
+          totalFiles: files.length,
+          filesWithLinks,
+          orphanedFiles
+        }
+      });
+    } catch (error) {
+      this.returnCannedResponse(res, {
+        errorCode: ErrorCode.InvalidFilterQuery,
+        message: error.message
+      });
+    }
+  }
+
+  async linksBrokenGet(req: express.Request, res: express.Response): Promise<void> {
+    try {
+      const brokenLinks: any[] = [];
+      const files = this.app.vault.getMarkdownFiles();
+      const allFilePaths = new Set(files.map(f => f.path));
+      
+      // Check each link to see if target exists
+      for (const file of files) {
+        const cache = this.app.metadataCache.getFileCache(file);
+        const links = cache?.links || [];
+        
+        for (const link of links) {
+          const resolvedTarget = this.resolveLinkTarget(link.link, file.path);
+          
+          if (!allFilePaths.has(resolvedTarget)) {
+            // Generate suggestions for broken links
+            const suggestions = this.generateLinkSuggestions(link.link, allFilePaths);
+            
+            brokenLinks.push({
+              source: file.path,
+              target: link.link,
+              original: link.original,
+              displayText: link.displayText || link.link,
+              resolvedTarget,
+              suggestions,
+              position: link.position
+            });
+          }
+        }
+      }
+      
+      res.json({
+        brokenLinks,
+        count: brokenLinks.length
+      });
+    } catch (error) {
+      this.returnCannedResponse(res, {
+        errorCode: ErrorCode.InvalidFilterQuery,
+        message: error.message
+      });
+    }
+  }
+
+  generateLinkSuggestions(brokenLink: string, allFilePaths: Set<string>): string[] {
+    const suggestions: string[] = [];
+    const linkLower = brokenLink.toLowerCase();
+    
+    // Find files with similar names
+    for (const filePath of allFilePaths) {
+      const fileName = filePath.substring(filePath.lastIndexOf('/') + 1, filePath.lastIndexOf('.'));
+      
+      if (fileName.toLowerCase().includes(linkLower) || linkLower.includes(fileName.toLowerCase())) {
+        suggestions.push(filePath);
+      }
+    }
+    
+    return suggestions.slice(0, 5); // Limit to 5 suggestions
+  }
+
+  async linksOrphanedGet(req: express.Request, res: express.Response): Promise<void> {
+    try {
+      const files = this.app.vault.getMarkdownFiles();
+      const allLinks: string[] = [];
+      
+      // Collect all link targets
+      for (const file of files) {
+        const cache = this.app.metadataCache.getFileCache(file);
+        const links = cache?.links || [];
+        
+        for (const link of links) {
+          const resolvedTarget = this.resolveLinkTarget(link.link, file.path);
+          allLinks.push(resolvedTarget);
+        }
+      }
+      
+      const linkedFiles = new Set(allLinks);
+      const orphanedFiles: any[] = [];
+      
+      // Find files that are not linked by any other file
+      for (const file of files) {
+        if (!linkedFiles.has(file.path)) {
+          orphanedFiles.push({
+            path: file.path,
+            metadata: {
+              size: file.stat.size,
+              created: file.stat.ctime,
+              modified: file.stat.mtime
+            }
+          });
+        }
+      }
+      
+      res.json({
+        orphanedFiles,
+        count: orphanedFiles.length
+      });
+    } catch (error) {
+      this.returnCannedResponse(res, {
+        errorCode: ErrorCode.InvalidFilterQuery,
+        message: error.message
+      });
+    }
+  }
+
   async searchAdvancedPost(
     req: express.Request,
     res: express.Response
