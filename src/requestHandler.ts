@@ -1008,10 +1008,6 @@ export default class RequestHandler {
           movedFiles.push({oldPath: file.path, newPath: newFilePath});
         }
         
-        // Remove empty source directory structure
-        // We need to be careful here and only remove directories that are now empty
-        await this.removeEmptyDirectoriesRecursively(path);
-        
         res.status(200).json({
           message: "Directory successfully moved",
           oldPath: path,
@@ -1042,39 +1038,6 @@ export default class RequestHandler {
         errorCode: 50001,
         message: `Failed to move directory: ${error.message}`
       });
-    }
-  }
-
-  async removeEmptyDirectoriesRecursively(dirPath: string): Promise<void> {
-    try {
-      // Check if directory exists and is empty
-      const dirExists = await this.app.vault.adapter.exists(dirPath);
-      if (!dirExists) {
-        return;
-      }
-
-      // List contents of directory
-      const contents = await (this.app.vault.adapter as any).list(dirPath);
-      
-      // If directory has files, don't remove it
-      if (contents.files.length > 0) {
-        return;
-      }
-      
-      // Recursively remove empty subdirectories first
-      for (const subDir of contents.folders) {
-        await this.removeEmptyDirectoriesRecursively(subDir);
-      }
-      
-      // Check again if directory is now empty after removing subdirectories
-      const updatedContents = await (this.app.vault.adapter as any).list(dirPath);
-      if (updatedContents.files.length === 0 && updatedContents.folders.length === 0) {
-        await (this.app.vault.adapter as any).rmdir(dirPath, false);
-      }
-      
-    } catch (error) {
-      // If we can't remove a directory, that's not necessarily fatal
-      console.warn(`Could not remove directory ${dirPath}:`, error);
     }
   }
 
@@ -1187,8 +1150,6 @@ export default class RequestHandler {
           deletedFilesCount++;
         }
         
-        // Remove the empty directory structure
-        await this.removeEmptyDirectoriesRecursively(path);
       } else {
         // Move files to trash using Obsidian's trash system
         for (const file of directoryFiles) {
@@ -1196,8 +1157,6 @@ export default class RequestHandler {
           deletedFilesCount++;
         }
         
-        // Remove the empty directory structure  
-        await this.removeEmptyDirectoriesRecursively(path);
       }
       
       res.status(200).json({
@@ -1317,10 +1276,6 @@ export default class RequestHandler {
           movedFiles.push({oldPath: file.path, newPath: newFilePath});
         }
         
-        // Remove empty source directory structure
-        // We need to be careful here and only remove directories that are now empty
-        await this.removeEmptyDirectoriesRecursively(path);
-        
         res.status(200).json({
           message: "Directory successfully moved",
           oldPath: path,
@@ -1351,39 +1306,6 @@ export default class RequestHandler {
         errorCode: 50001,
         message: `Failed to move directory: ${error.message}`
       });
-    }
-  }
-
-  async removeEmptyDirectoriesRecursively(dirPath: string): Promise<void> {
-    try {
-      // Check if directory exists and is empty
-      const dirExists = await this.app.vault.adapter.exists(dirPath);
-      if (!dirExists) {
-        return;
-      }
-
-      // List contents of directory
-      const contents = await (this.app.vault.adapter as any).list(dirPath);
-      
-      // If directory has files, don't remove it
-      if (contents.files.length > 0) {
-        return;
-      }
-      
-      // Recursively remove empty subdirectories first
-      for (const subDir of contents.folders) {
-        await this.removeEmptyDirectoriesRecursively(subDir);
-      }
-      
-      // Check again if directory is now empty after removing subdirectories
-      const updatedContents = await (this.app.vault.adapter as any).list(dirPath);
-      if (updatedContents.files.length === 0 && updatedContents.folders.length === 0) {
-        await (this.app.vault.adapter as any).rmdir(dirPath, false);
-      }
-      
-    } catch (error) {
-      // If we can't remove a directory, that's not necessarily fatal
-      console.warn(`Could not remove directory ${dirPath}:`, error);
     }
   }
 
@@ -1496,8 +1418,6 @@ export default class RequestHandler {
           deletedFilesCount++;
         }
         
-        // Remove the empty directory structure
-        await this.removeEmptyDirectoriesRecursively(path);
       } else {
         // Move files to trash using Obsidian's trash system
         for (const file of directoryFiles) {
@@ -1505,8 +1425,6 @@ export default class RequestHandler {
           deletedFilesCount++;
         }
         
-        // Remove the empty directory structure  
-        await this.removeEmptyDirectoriesRecursively(path);
       }
       
       res.status(200).json({
