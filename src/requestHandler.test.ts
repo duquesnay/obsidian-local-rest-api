@@ -459,6 +459,28 @@ describe("requestHandler", () => {
         .expect(405);
     });
 
+    test("directory path without Target-Type returns 405 for backward compatibility", async () => {
+      // Mock that path exists but is not a file (it's a directory)
+      app.vault.adapter._exists = true;
+      app.vault._markdownFiles = []; // No files with this exact path
+      
+      await request(server)
+        .delete("/vault/some-directory")
+        .set("Authorization", `Bearer ${API_KEY}`)
+        .expect(405);
+    });
+
+    test("directory path with Target-Type: file returns 405", async () => {
+      app.vault.adapter._exists = true;
+      app.vault._markdownFiles = [];
+      
+      await request(server)
+        .delete("/vault/some-directory")
+        .set("Authorization", `Bearer ${API_KEY}`)
+        .set("Target-Type", "file")
+        .expect(405);
+    });
+
     test("non-existing file", async () => {
       const arbitraryFilePath = "somefile.md";
       const arbitraryBytes = "bytes";

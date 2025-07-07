@@ -53,5 +53,15 @@
         },
       },
     },
+    '405': {
+      description: 'Your path references a directory instead of a file; this request method is valid only for updating files.\n',
+      content: {
+        'application/json': {
+          schema: {
+            '$ref': '#/components/schemas/Error',
+          },
+        },
+      },
+    },
   },
 }

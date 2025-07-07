@@ -738,6 +738,25 @@ export default class RequestHandler {
       return this.handleDirectoryDeleteOperation(path, req, res);
     }
 
+    // For backward compatibility, check if path is a directory when Target-Type is not specified
+    if (!targetType || targetType === "file") {
+      // Check if path exists and is a directory
+      const pathExists = await this.app.vault.adapter.exists(path);
+      if (pathExists) {
+        const allFiles = this.app.vault.getFiles();
+        const exactFile = allFiles.find(file => file.path === path);
+        
+        // If path exists but is not a file, it's a directory
+        if (!exactFile) {
+          // Return 405 for backward compatibility
+          this.returnCannedResponse(res, {
+            errorCode: ErrorCode.RequestMethodValidOnlyForFiles,
+          });
+          return;
+        }
+      }
+    }
+
     return this._vaultDelete(path, req, res);
   }
 
