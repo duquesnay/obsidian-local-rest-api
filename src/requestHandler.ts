@@ -1309,136 +1309,36 @@ export default class RequestHandler {
     }
   }
 
-  async handleDirectoryCreateOperation(
-    path: string,
-    req: express.Request,
-    res: express.Response
-  ): Promise<void> {
-    if (!path || path.endsWith("/")) {
-      res.status(400).json({
-        errorCode: 40001,
-        message: "Directory path is required and should not end with '/'"
-      });
-      return;
-    }
-
-    // Check if directory already exists
+  async removeEmptyDirectoriesRecursively(dirPath: string): Promise<void> {
     try {
-      const exists = await this.app.vault.adapter.exists(path);
-      if (exists) {
-        res.status(409).json({
-          errorCode: 40901,
-          message: "Directory already exists"
-        });
+      // Check if directory exists and is empty
+      const dirExists = await this.app.vault.adapter.exists(dirPath);
+      if (!dirExists) {
         return;
       }
-    } catch (error) {
-      // If we can't check existence, continue with creation attempt
-    }
 
-    // Check if there's a file with the same path
-    const allFiles = this.app.vault.getFiles();
-    const conflictingFile = allFiles.find(file => file.path === path);
-    if (conflictingFile) {
-      res.status(409).json({
-        errorCode: 40902,
-        message: "A file with the same path already exists"
-      });
-      return;
-    }
-
-    try {
-      // Create the directory (this will also create parent directories if needed)
-      await this.app.vault.createFolder(path);
+      // List contents of directory
+      const contents = await (this.app.vault.adapter as any).list(dirPath);
       
-      res.status(201).json({
-        message: "Directory successfully created",
-        path: path
-      });
-      
-    } catch (error) {
-      res.status(500).json({
-        errorCode: 50001,
-        message: `Failed to create directory: ${error.message}`
-      });
-    }
-  }
-
-  async handleDirectoryDeleteOperation(
-    path: string,
-    req: express.Request,
-    res: express.Response
-  ): Promise<void> {
-    if (!path || path.endsWith("/")) {
-      res.status(400).json({
-        errorCode: 40001,
-        message: "Directory path is required and should not end with '/'"
-      });
-      return;
-    }
-
-    // Check if directory exists
-    try {
-      const exists = await this.app.vault.adapter.exists(path);
-      if (!exists) {
-        this.returnCannedResponse(res, { statusCode: 404 });
+      // If directory has files, don't remove it
+      if (contents.files.length > 0) {
         return;
       }
-    } catch (error) {
-      this.returnCannedResponse(res, { statusCode: 404 });
-      return;
-    }
-
-    // Check if path is actually a directory (not a file)
-    const allFiles = this.app.vault.getFiles();
-    const exactFile = allFiles.find(file => file.path === path);
-    if (exactFile) {
-      res.status(400).json({
-        errorCode: 40001,
-        message: "Path is a file, not a directory"
-      });
-      return;
-    }
-
-    // Get all files in the directory
-    const directoryFiles = allFiles.filter(file => 
-      file.path.startsWith(path + "/")
-    );
-
-    // Check if we should move to trash or permanently delete
-    const permanent = req.get("Permanent") === "true";
-    
-    try {
-      let deletedFilesCount = 0;
       
-      if (permanent) {
-        // Permanently delete all files in the directory
-        for (const file of directoryFiles) {
-          await this.app.vault.adapter.remove(file.path);
-          deletedFilesCount++;
-        }
-        
-      } else {
-        // Move files to trash using Obsidian's trash system
-        for (const file of directoryFiles) {
-          await this.app.vault.trash(file, false);
-          deletedFilesCount++;
-        }
-        
+      // Recursively remove empty subdirectories first
+      for (const subDir of contents.folders) {
+        await this.removeEmptyDirectoriesRecursively(subDir);
       }
       
-      res.status(200).json({
-        message: permanent ? "Directory permanently deleted" : "Directory moved to trash",
-        path: path,
-        deletedFilesCount: deletedFilesCount,
-        permanent: permanent
-      });
+      // Check again if directory is now empty after removing subdirectories
+      const updatedContents = await (this.app.vault.adapter as any).list(dirPath);
+      if (updatedContents.files.length === 0 && updatedContents.folders.length === 0) {
+        await (this.app.vault.adapter as any).rmdir(dirPath, false);
+      }
       
     } catch (error) {
-      res.status(500).json({
-        errorCode: 50001,
-        message: `Failed to delete directory: ${error.message}`
-      });
+      // If we can't remove a directory, that's not necessarily fatal
+      console.warn(`Could not remove directory ${dirPath}:`, error);
     }
   }
 
