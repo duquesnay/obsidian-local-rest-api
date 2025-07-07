@@ -197,7 +197,7 @@ std.manifestYamlDoc(
           tags: [
             'Vault Files',
           ],
-          summary: 'Delete a particular file in your vault.\n',
+          summary: 'Delete a particular file or directory in your vault.\n',
           parameters: Delete.parameters + [ParamPath],
         },
       },
