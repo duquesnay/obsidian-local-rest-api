@@ -13,13 +13,15 @@
           'replace',
           'rename',
           'move',
+          'add',
+          'remove',
         ],
       },
     },
     {
       name: 'Target-Type',
       'in': 'header',
-      description: 'Type of target to patch',
+      description: 'Type of target to patch - heading (insert at heading), block (modify block content), frontmatter (update metadata), file (rename/move), directory (move), tag (add/remove)',
       required: true,
       schema: {
         type: 'string',
@@ -28,6 +30,8 @@
           'block',
           'frontmatter',
           'file',
+          'directory',
+          'tag',
         ],
       },
     },
@@ -70,7 +74,7 @@
         ],
         default: 'false',
       },
-    }
+    },
     {
       name: 'Apply-If-Content-Preexists',
       'in': 'header',
@@ -84,7 +88,7 @@
         ],
         default: 'false',
       },
-    }
+    },
     {
       name: 'Trim-Target-Whitespace',
       'in': 'header',
@@ -101,7 +105,7 @@
     },
   ],
   requestBody: {
-    description: 'Content you would like to insert.',
+    description: 'Content you would like to insert, append, prepend, or replace with. For replace operations on blocks, this will completely replace the block content.',
     required: true,
     content: {
       'text/markdown': {
@@ -154,7 +158,7 @@
     },
   },
   description: |||
-    Allows you to modify the content relative to a heading, block reference, or frontmatter field in your document.
+    Allows you to modify file content - insert, append, prepend, or replace content at specific targets (headings, blocks, frontmatter), or perform file operations (rename, move, tag management).
 
     Note that this API was changed in Version 3.0 of this extension and the earlier PATCH API is now deprecated. Requests made using the previous version of this API will continue to work until Version 4.0 is released.  See https://github.com/coddingtonbear/obsidian-local-rest-api/wiki/Changes-to-PATCH-requests-between-versions-2.0-and-3.0 for more details and migration instructions.
 
@@ -235,6 +239,19 @@
 
     The above would work just fine for `prepend` or `replace`, too, of course,
     but with different results.
+
+    ## Replace Entire Block Content
+
+    If you wanted to completely replace the content of the block referenced by
+    "2d9b4a" with new content, you could send the following headers:
+
+    - `Operation`: `replace`
+    - `Target-Type`: `block`
+    - `Target`: `2d9b4a`
+    - with the request body: `This is the new content that completely replaces "More random text."`
+
+    This will replace the entire block content with your new text, which is useful
+    for updating specific sections of your document programmatically.
 
     ## Append, Prepend, or Replace a Row or Rows to/in a Table Referenced by a Block Reference
 
