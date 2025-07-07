@@ -55,6 +55,7 @@
         For file operations:
         - When Operation is 'rename' and Target-Type is 'file': Target should be the new filename
         - When Operation is 'move' and Target-Type is 'file': Target should be the new file path
+        - When Operation is 'move' and Target-Type is 'directory': Target should be the new directory path
       |||,
       required: true,
       schema: {
@@ -317,6 +318,15 @@
     - `Target`: `new/path/to/file.md`
     - Request body: empty
 
+    ### Moving a Directory
+
+    To move a directory to a new path, use:
+    - `Operation`: `move`
+    - `Target-Type`: `directory`
+    - `Target`: `new/path/to/directory`
+    - Request body: empty
+
     File rename and move operations preserve internal links within your vault.
+    Directory move operations move all files within the directory while preserving links.
   |||,
 }

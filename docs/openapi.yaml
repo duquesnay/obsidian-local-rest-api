@@ -297,7 +297,16 @@ paths:
         - `Target`: `new/path/to/file.md`
         - Request body: empty
         
+        ### Moving a Directory
+        
+        To move a directory to a new path, use:
+        - `Operation`: `move`
+        - `Target-Type`: `directory`
+        - `Target`: `new/path/to/directory`
+        - Request body: empty
+        
         File rename and move operations preserve internal links within your vault.
+        Directory move operations move all files within the directory while preserving links.
       parameters:
         - description: "Patch operation to perform"
           in: "header"
@@ -321,6 +330,7 @@ paths:
               - "block"
               - "frontmatter"
               - "file"
+              - "directory"
             type: "string"
         - description: "Delimiter to use for nested targets (i.e. Headings)"
           in: "header"
@@ -336,6 +346,7 @@ paths:
             For file operations:
             - When Operation is 'rename' and Target-Type is 'file': Target should be the new filename
             - When Operation is 'move' and Target-Type is 'file': Target should be the new file path
+            - When Operation is 'move' and Target-Type is 'directory': Target should be the new directory path
           in: "header"
           name: "Target"
           required: true
@@ -783,7 +794,16 @@ paths:
         - `Target`: `new/path/to/file.md`
         - Request body: empty
         
+        ### Moving a Directory
+        
+        To move a directory to a new path, use:
+        - `Operation`: `move`
+        - `Target-Type`: `directory`
+        - `Target`: `new/path/to/directory`
+        - Request body: empty
+        
         File rename and move operations preserve internal links within your vault.
+        Directory move operations move all files within the directory while preserving links.
       parameters:
         - description: "Patch operation to perform"
           in: "header"
@@ -807,6 +827,7 @@ paths:
               - "block"
               - "frontmatter"
               - "file"
+              - "directory"
             type: "string"
         - description: "Delimiter to use for nested targets (i.e. Headings)"
           in: "header"
@@ -822,6 +843,7 @@ paths:
             For file operations:
             - When Operation is 'rename' and Target-Type is 'file': Target should be the new filename
             - When Operation is 'move' and Target-Type is 'file': Target should be the new file path
+            - When Operation is 'move' and Target-Type is 'directory': Target should be the new directory path
           in: "header"
           name: "Target"
           required: true
@@ -1248,7 +1270,16 @@ paths:
         - `Target`: `new/path/to/file.md`
         - Request body: empty
         
+        ### Moving a Directory
+        
+        To move a directory to a new path, use:
+        - `Operation`: `move`
+        - `Target-Type`: `directory`
+        - `Target`: `new/path/to/directory`
+        - Request body: empty
+        
         File rename and move operations preserve internal links within your vault.
+        Directory move operations move all files within the directory while preserving links.
       parameters:
         - description: "Patch operation to perform"
           in: "header"
@@ -1272,6 +1303,7 @@ paths:
               - "block"
               - "frontmatter"
               - "file"
+              - "directory"
             type: "string"
         - description: "Delimiter to use for nested targets (i.e. Headings)"
           in: "header"
@@ -1287,6 +1319,7 @@ paths:
             For file operations:
             - When Operation is 'rename' and Target-Type is 'file': Target should be the new filename
             - When Operation is 'move' and Target-Type is 'file': Target should be the new file path
+            - When Operation is 'move' and Target-Type is 'directory': Target should be the new directory path
           in: "header"
           name: "Target"
           required: true
@@ -1931,7 +1964,16 @@ paths:
         - `Target`: `new/path/to/file.md`
         - Request body: empty
         
+        ### Moving a Directory
+        
+        To move a directory to a new path, use:
+        - `Operation`: `move`
+        - `Target-Type`: `directory`
+        - `Target`: `new/path/to/directory`
+        - Request body: empty
+        
         File rename and move operations preserve internal links within your vault.
+        Directory move operations move all files within the directory while preserving links.
       parameters:
         - description: "Patch operation to perform"
           in: "header"
@@ -1955,6 +1997,7 @@ paths:
               - "block"
               - "frontmatter"
               - "file"
+              - "directory"
             type: "string"
         - description: "Delimiter to use for nested targets (i.e. Headings)"
           in: "header"
@@ -1970,6 +2013,7 @@ paths:
             For file operations:
             - When Operation is 'rename' and Target-Type is 'file': Target should be the new filename
             - When Operation is 'move' and Target-Type is 'file': Target should be the new file path
+            - When Operation is 'move' and Target-Type is 'directory': Target should be the new directory path
           in: "header"
           name: "Target"
           required: true
