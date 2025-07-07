@@ -510,14 +510,61 @@ export default class RequestHandler {
       return;
     }
     
-    // Check for file-level operations (like rename) BEFORE validation
-    if (targetType === "file" && operation === "replace") {
-      if (rawTarget === "name") {
+    // Check for file-level operations BEFORE general validation
+    if (targetType === "file") {
+      // Handle semantic file operations
+      if (operation === "rename") {
+        if (rawTarget !== "name") {
+          res.status(400).json({
+            errorCode: 40004,
+            message: "rename operation must use Target: name"
+          });
+          return;
+        }
+        return this.handleRenameOperation(path, req, res);
+      }
+      
+      if (operation === "move") {
+        if (rawTarget !== "path") {
+          res.status(400).json({
+            errorCode: 40005,
+            message: "move operation must use Target: path"  
+          });
+          return;
+        }
+        return this.handleMoveOperation(path, req, res);
+      }
+      
+      // Legacy support for "replace" operation with file target type
+      if (operation === "replace" && rawTarget === "name") {
         return this.handleRenameOperation(path, req, res);
       }
     }
     
-    if (!["heading", "block", "frontmatter"].includes(targetType)) {
+    // Check for directory-level operations BEFORE general validation
+    if (targetType === "directory") {
+      if (operation === "move") {
+        if (rawTarget !== "path") {
+          res.status(400).json({
+            errorCode: 40005,
+            message: "move operation must use Target: path"  
+          });
+          return;
+        }
+        return this.handleDirectoryMoveOperation(path, req, res);
+      }
+    }
+    
+    // Validate that file-specific operations are only used with file target type
+    if ((operation === "rename" || operation === "move") && !["file", "directory"].includes(targetType)) {
+      res.status(400).json({
+        errorCode: 40006,
+        message: `Operation '${operation}' is only valid for Target-Type: file or directory`
+      });
+      return;
+    }
+    
+    if (!["heading", "block", "frontmatter", "file", "directory"].includes(targetType)) {
       this.returnCannedResponse(res, {
         errorCode: ErrorCode.InvalidTargetTypeHeader,
       });
@@ -529,7 +576,7 @@ export default class RequestHandler {
       });
       return;
     }
-    if (!["append", "prepend", "replace"].includes(operation)) {
+    if (!["append", "prepend", "replace", "rename", "move"].includes(operation)) {
       this.returnCannedResponse(res, {
         errorCode: ErrorCode.InvalidOperation,
       });
@@ -645,6 +692,12 @@ export default class RequestHandler {
       req.path.slice(req.path.indexOf("/", 1) + 1)
     );
 
+    // Check for directory creation
+    const targetType = req.get("Target-Type");
+    if (targetType === "directory") {
+      return this.handleDirectoryCreateOperation(path, req, res);
+    }
+
     return this._vaultPost(path, req, res);
   }
 
@@ -678,6 +731,12 @@ export default class RequestHandler {
     const path = decodeURIComponent(
       req.path.slice(req.path.indexOf("/", 1) + 1)
     );
+
+    // Check for directory deletion
+    const targetType = req.get("Target-Type");
+    if (targetType === "directory") {
+      return this.handleDirectoryDeleteOperation(path, req, res);
+    }
 
     return this._vaultDelete(path, req, res);
   }
@@ -750,6 +809,389 @@ export default class RequestHandler {
       res.status(500).json({
         errorCode: 50001,
         message: `Failed to rename file: ${error.message}`
+      });
+    }
+  }
+
+  async handleMoveOperation(
+    path: string,
+    req: express.Request,
+    res: express.Response
+  ): Promise<void> {
+    
+    if (!path || path.endsWith("/")) {
+      this.returnCannedResponse(res, {
+        errorCode: ErrorCode.RequestMethodValidOnlyForFiles,
+      });
+      return;
+    }
+
+    // For move operations, the new path should be in the request body
+    const newPath = typeof req.body === 'string' ? req.body.trim() : '';
+    
+    if (!newPath) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "New path is required in request body"
+      });
+      return;
+    }
+
+    // Validate new path
+    if (newPath.endsWith("/")) {
+      res.status(400).json({
+        errorCode: 40002,
+        message: "New path must be a file path, not a directory"
+      });
+      return;
+    }
+
+    // Check if source file exists
+    const sourceFile = this.app.vault.getAbstractFileByPath(path);
+    if (!sourceFile || !(sourceFile instanceof TFile)) {
+      this.returnCannedResponse(res, { statusCode: 404 });
+      return;
+    }
+
+    // Check if destination already exists
+    const destExists = await this.app.vault.adapter.exists(newPath);
+    if (destExists) {
+      res.status(409).json({
+        errorCode: 40901,
+        message: "Destination file already exists"
+      });
+      return;
+    }
+
+    try {
+      // Ensure parent directory exists
+      const parentDir = newPath.substring(0, newPath.lastIndexOf('/'));
+      if (parentDir && !(await this.app.vault.adapter.exists(parentDir))) {
+        await this.app.vault.createFolder(parentDir);
+      }
+      
+      // Use FileManager to move the file (preserves history and updates links)
+      // @ts-ignore - fileManager exists at runtime but not in type definitions
+      await this.app.fileManager.renameFile(sourceFile, newPath);
+      
+      res.status(200).json({
+        message: "File successfully moved",
+        oldPath: path,
+        newPath: newPath
+      });
+    } catch (error) {
+      res.status(500).json({
+        errorCode: 50001,
+        message: `Failed to move file: ${error.message}`
+      });
+    }
+  }
+
+  async handleDirectoryMoveOperation(
+    path: string,
+    req: express.Request,
+    res: express.Response
+  ): Promise<void> {
+    
+    // Validate directory path (should end with "/" or be a valid directory)
+    if (!path) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "Directory path is required"
+      });
+      return;
+    }
+
+    // Get the new directory path from request body
+    const newPath = typeof req.body === 'string' ? req.body.trim() : '';
+    
+    if (!newPath) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "New directory path is required in request body"
+      });
+      return;
+    }
+
+    // Check if source directory exists
+    const sourceExists = await this.app.vault.adapter.exists(path);
+    if (!sourceExists) {
+      this.returnCannedResponse(res, { statusCode: 404 });
+      return;
+    }
+
+    // Check if source is actually a directory
+    try {
+      const sourceStat = await this.app.vault.adapter.stat(path);
+      if (sourceStat && sourceStat.type !== "folder") {
+        res.status(400).json({
+          errorCode: 40002,
+          message: "Source path is not a directory"
+        });
+        return;
+      }
+    } catch (error) {
+      res.status(400).json({
+        errorCode: 40002,
+        message: "Source path is not a directory"
+      });
+      return;
+    }
+
+    // Check if destination already exists
+    const destExists = await this.app.vault.adapter.exists(newPath);
+    if (destExists) {
+      res.status(409).json({
+        errorCode: 40901,
+        message: "Destination directory already exists"
+      });
+      return;
+    }
+
+    // Create parent directories if needed for destination
+    const parentDir = newPath.substring(0, newPath.lastIndexOf('/'));
+    if (parentDir) {
+      try {
+        await this.app.vault.createFolder(parentDir);
+      } catch {
+        // Folder might already exist, continue
+      }
+    }
+
+    try {
+      // Get all files in the source directory recursively
+      const allFiles = this.app.vault.getFiles();
+      const filesToMove = allFiles.filter(file => file.path.startsWith(path + "/"));
+      
+      // Track moved files for potential rollback
+      const movedFiles: Array<{oldPath: string, newPath: string}> = [];
+      
+      try {
+        // Move each file individually to preserve links
+        for (const file of filesToMove) {
+          const relativePath = file.path.substring(path.length + 1);
+          const newFilePath = `${newPath}/${relativePath}`;
+          
+          // Create intermediate directories if needed
+          const fileParentDir = newFilePath.substring(0, newFilePath.lastIndexOf('/'));
+          if (fileParentDir && fileParentDir !== newPath) {
+            try {
+              await this.app.vault.createFolder(fileParentDir);
+            } catch {
+              // Directory might already exist
+            }
+          }
+          
+          // Use FileManager to move the file (preserves history and updates links)
+          // @ts-ignore - fileManager exists at runtime but not in type definitions
+          await this.app.fileManager.renameFile(file, newFilePath);
+          
+          movedFiles.push({oldPath: file.path, newPath: newFilePath});
+        }
+        
+        // Remove empty source directory structure
+        // We need to be careful here and only remove directories that are now empty
+        await this.removeEmptyDirectoriesRecursively(path);
+        
+        res.status(200).json({
+          message: "Directory successfully moved",
+          oldPath: path,
+          newPath: newPath,
+          filesMovedCount: filesToMove.length
+        });
+        
+      } catch (moveError) {
+        // Attempt rollback - this is best effort
+        for (const moved of movedFiles.reverse()) {
+          try {
+            const movedFile = this.app.vault.getAbstractFileByPath(moved.newPath);
+            if (movedFile instanceof TFile) {
+              // @ts-ignore
+              await this.app.fileManager.renameFile(movedFile, moved.oldPath);
+            }
+          } catch (rollbackError) {
+            // Log rollback error but don't fail the main error response
+            console.error(`Failed to rollback file ${moved.newPath} to ${moved.oldPath}:`, rollbackError);
+          }
+        }
+        
+        throw moveError;
+      }
+      
+    } catch (error) {
+      res.status(500).json({
+        errorCode: 50001,
+        message: `Failed to move directory: ${error.message}`
+      });
+    }
+  }
+
+  async removeEmptyDirectoriesRecursively(dirPath: string): Promise<void> {
+    try {
+      // Check if directory exists and is empty
+      const dirExists = await this.app.vault.adapter.exists(dirPath);
+      if (!dirExists) {
+        return;
+      }
+
+      // List contents of directory
+      const contents = await (this.app.vault.adapter as any).list(dirPath);
+      
+      // If directory has files, don't remove it
+      if (contents.files.length > 0) {
+        return;
+      }
+      
+      // Recursively remove empty subdirectories first
+      for (const subDir of contents.folders) {
+        await this.removeEmptyDirectoriesRecursively(subDir);
+      }
+      
+      // Check again if directory is now empty after removing subdirectories
+      const updatedContents = await (this.app.vault.adapter as any).list(dirPath);
+      if (updatedContents.files.length === 0 && updatedContents.folders.length === 0) {
+        await (this.app.vault.adapter as any).rmdir(dirPath, false);
+      }
+      
+    } catch (error) {
+      // If we can't remove a directory, that's not necessarily fatal
+      console.warn(`Could not remove directory ${dirPath}:`, error);
+    }
+  }
+
+  async handleDirectoryCreateOperation(
+    path: string,
+    req: express.Request,
+    res: express.Response
+  ): Promise<void> {
+    if (!path || path.endsWith("/")) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "Directory path is required and should not end with '/'"
+      });
+      return;
+    }
+
+    // Check if directory already exists
+    try {
+      const exists = await this.app.vault.adapter.exists(path);
+      if (exists) {
+        res.status(409).json({
+          errorCode: 40901,
+          message: "Directory already exists"
+        });
+        return;
+      }
+    } catch (error) {
+      // If we can't check existence, continue with creation attempt
+    }
+
+    // Check if there's a file with the same path
+    const allFiles = this.app.vault.getFiles();
+    const conflictingFile = allFiles.find(file => file.path === path);
+    if (conflictingFile) {
+      res.status(409).json({
+        errorCode: 40902,
+        message: "A file with the same path already exists"
+      });
+      return;
+    }
+
+    try {
+      // Create the directory (this will also create parent directories if needed)
+      await this.app.vault.createFolder(path);
+      
+      res.status(201).json({
+        message: "Directory successfully created",
+        path: path
+      });
+      
+    } catch (error) {
+      res.status(500).json({
+        errorCode: 50001,
+        message: `Failed to create directory: ${error.message}`
+      });
+    }
+  }
+
+  async handleDirectoryDeleteOperation(
+    path: string,
+    req: express.Request,
+    res: express.Response
+  ): Promise<void> {
+    if (!path || path.endsWith("/")) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "Directory path is required and should not end with '/'"
+      });
+      return;
+    }
+
+    // Check if directory exists
+    try {
+      const exists = await this.app.vault.adapter.exists(path);
+      if (!exists) {
+        this.returnCannedResponse(res, { statusCode: 404 });
+        return;
+      }
+    } catch (error) {
+      this.returnCannedResponse(res, { statusCode: 404 });
+      return;
+    }
+
+    // Check if path is actually a directory (not a file)
+    const allFiles = this.app.vault.getFiles();
+    const exactFile = allFiles.find(file => file.path === path);
+    if (exactFile) {
+      res.status(400).json({
+        errorCode: 40001,
+        message: "Path is a file, not a directory"
+      });
+      return;
+    }
+
+    // Get all files in the directory
+    const directoryFiles = allFiles.filter(file => 
+      file.path.startsWith(path + "/")
+    );
+
+    // Check if we should move to trash or permanently delete
+    const permanent = req.get("Permanent") === "true";
+    
+    try {
+      let deletedFilesCount = 0;
+      
+      if (permanent) {
+        // Permanently delete all files in the directory
+        for (const file of directoryFiles) {
+          await this.app.vault.adapter.remove(file.path);
+          deletedFilesCount++;
+        }
+        
+        // Remove the empty directory structure
+        await this.removeEmptyDirectoriesRecursively(path);
+      } else {
+        // Move files to trash using Obsidian's trash system
+        for (const file of directoryFiles) {
+          await this.app.vault.trash(file, false);
+          deletedFilesCount++;
+        }
+        
+        // Remove the empty directory structure  
+        await this.removeEmptyDirectoriesRecursively(path);
+      }
+      
+      res.status(200).json({
+        message: permanent ? "Directory permanently deleted" : "Directory moved to trash",
+        path: path,
+        deletedFilesCount: deletedFilesCount,
+        permanent: permanent
+      });
+      
+    } catch (error) {
+      res.status(500).json({
+        errorCode: 50001,
+        message: `Failed to delete directory: ${error.message}`
       });
     }
   }

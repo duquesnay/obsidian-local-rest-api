@@ -343,6 +343,112 @@ describe("requestHandler", () => {
 
       expect(app.vault.adapter._write).toBeUndefined();
     });
+
+    describe("directory operations", () => {
+      describe("create directory", () => {
+        test("successful directory creation", async () => {
+          const dirPath = "new-folder";
+          
+          // Mock directory doesn't exist
+          app.vault.adapter.exists = jest.fn().mockResolvedValue(false);
+          app.vault._files = []; // No conflicting files
+          
+          // Mock createFolder
+          app.vault.createFolder = jest.fn().mockResolvedValue(undefined);
+          
+          const response = await request(server)
+            .post(`/vault/${dirPath}`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "directory")
+            .expect(201);
+            
+          expect(response.body.message).toEqual("Directory successfully created");
+          expect(response.body.path).toEqual(dirPath);
+          expect(app.vault.createFolder).toHaveBeenCalledWith(dirPath);
+        });
+
+        test("directory already exists", async () => {
+          const dirPath = "existing-folder";
+          
+          // Mock directory exists
+          app.vault.adapter.exists = jest.fn().mockResolvedValue(true);
+          
+          const response = await request(server)
+            .post(`/vault/${dirPath}`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "directory")
+            .expect(409);
+            
+          expect(response.body.message).toEqual("Directory already exists");
+        });
+
+        test("conflicting file exists", async () => {
+          const dirPath = "conflict.md";
+          
+          // Mock directory doesn't exist
+          app.vault.adapter.exists = jest.fn().mockResolvedValue(false);
+          
+          // Mock conflicting file
+          const conflictingFile = new TFile();
+          conflictingFile.path = "conflict.md";
+          app.vault._files = [conflictingFile];
+          
+          const response = await request(server)
+            .post(`/vault/${dirPath}`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "directory")
+            .expect(409);
+            
+          expect(response.body.message).toEqual("A file with the same path already exists");
+        });
+
+        test("invalid directory path ending with slash", async () => {
+          const response = await request(server)
+            .post("/vault/folder/")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "directory")
+            .expect(400);
+            
+          expect(response.body.message).toEqual("Directory path is required and should not end with '/'");
+        });
+
+        test("empty directory path", async () => {
+          const response = await request(server)
+            .post("/vault/")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "directory")
+            .expect(400);
+            
+          expect(response.body.message).toEqual("Directory path is required and should not end with '/'");
+        });
+
+        test("unauthorized request", async () => {
+          const response = await request(server)
+            .post("/vault/new-folder")
+            .set("Target-Type", "directory")
+            .expect(401);
+        });
+
+        test("createFolder fails", async () => {
+          const dirPath = "fail-folder";
+          
+          // Mock directory doesn't exist
+          app.vault.adapter.exists = jest.fn().mockResolvedValue(false);
+          app.vault._files = [];
+          
+          // Mock createFolder to fail
+          app.vault.createFolder = jest.fn().mockRejectedValue(new Error("Permission denied"));
+          
+          const response = await request(server)
+            .post(`/vault/${dirPath}`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "directory")
+            .expect(500);
+            
+          expect(response.body.message).toEqual("Failed to create directory: Permission denied");
+        });
+      });
+    });
   });
 
   describe("vaultDelete", () => {
@@ -392,6 +498,164 @@ describe("requestHandler", () => {
         .expect(204);
 
       expect(app.vault.adapter._remove).toEqual([arbitraryFilePath]);
+    });
+
+    describe("directory operations", () => {
+      describe("delete directory", () => {
+        test("successful directory deletion (move to trash)", async () => {
+          const dirPath = "folder-to-delete";
+          
+          // Mock directory exists
+          app.vault.adapter.exists = jest.fn().mockResolvedValue(true);
+          app.vault._files = []; // No conflicting files at exact path
+          
+          // Mock files in directory
+          const file1 = new TFile();
+          file1.path = "folder-to-delete/file1.md";
+          const file2 = new TFile();
+          file2.path = "folder-to-delete/subfolder/file2.md";
+          
+          app.vault._files = [file1, file2];
+          
+          // Mock trash function
+          app.vault.trash = jest.fn().mockResolvedValue(undefined);
+          
+          // Mock adapter list and rmdir for cleanup
+          (app.vault.adapter as any).list = jest.fn()
+            .mockResolvedValue({ files: [], folders: [] });
+          (app.vault.adapter as any).rmdir = jest.fn().mockResolvedValue(undefined);
+          
+          const response = await request(server)
+            .delete(`/vault/${dirPath}`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "directory")
+            .expect(200);
+            
+          expect(response.body.message).toEqual("Directory moved to trash");
+          expect(response.body.path).toEqual(dirPath);
+          expect(response.body.deletedFilesCount).toEqual(2);
+          expect(response.body.permanent).toEqual(false);
+          expect(app.vault.trash).toHaveBeenCalledWith(file1, false);
+          expect(app.vault.trash).toHaveBeenCalledWith(file2, false);
+        });
+
+        test("successful directory deletion (permanent)", async () => {
+          const dirPath = "folder-to-delete";
+          
+          // Mock directory exists
+          app.vault.adapter.exists = jest.fn().mockResolvedValue(true);
+          app.vault._files = []; // No conflicting files at exact path
+          
+          // Mock files in directory
+          const file1 = new TFile();
+          file1.path = "folder-to-delete/file1.md";
+          
+          app.vault._files = [file1];
+          
+          // Mock remove function for permanent deletion
+          app.vault.adapter.remove = jest.fn().mockResolvedValue(undefined);
+          
+          // Mock adapter list and rmdir for cleanup
+          (app.vault.adapter as any).list = jest.fn()
+            .mockResolvedValue({ files: [], folders: [] });
+          (app.vault.adapter as any).rmdir = jest.fn().mockResolvedValue(undefined);
+          
+          const response = await request(server)
+            .delete(`/vault/${dirPath}`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "directory")
+            .set("Permanent", "true")
+            .expect(200);
+            
+          expect(response.body.message).toEqual("Directory permanently deleted");
+          expect(response.body.permanent).toEqual(true);
+          expect(app.vault.adapter.remove).toHaveBeenCalledWith(file1.path);
+        });
+
+        test("directory not found", async () => {
+          const dirPath = "nonexistent-folder";
+          
+          // Mock directory doesn't exist
+          app.vault.adapter.exists = jest.fn().mockResolvedValue(false);
+          
+          const response = await request(server)
+            .delete(`/vault/${dirPath}`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "directory")
+            .expect(404);
+        });
+
+        test("path is a file, not directory", async () => {
+          const filePath = "somefile.md";
+          
+          // Mock path exists
+          app.vault.adapter.exists = jest.fn().mockResolvedValue(true);
+          
+          // Mock file at the exact path
+          const exactFile = new TFile();
+          exactFile.path = "somefile.md";
+          app.vault._files = [exactFile];
+          
+          const response = await request(server)
+            .delete(`/vault/${filePath}`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "directory")
+            .expect(400);
+            
+          expect(response.body.message).toEqual("Path is a file, not a directory");
+        });
+
+        test("invalid directory path ending with slash", async () => {
+          const response = await request(server)
+            .delete("/vault/folder/")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "directory")
+            .expect(400);
+            
+          expect(response.body.message).toEqual("Directory path is required and should not end with '/'");
+        });
+
+        test("empty directory path", async () => {
+          const response = await request(server)
+            .delete("/vault/")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "directory")
+            .expect(400);
+            
+          expect(response.body.message).toEqual("Directory path is required and should not end with '/'");
+        });
+
+        test("unauthorized request", async () => {
+          const response = await request(server)
+            .delete("/vault/folder-to-delete")
+            .set("Target-Type", "directory")
+            .expect(401);
+        });
+
+        test("deletion fails", async () => {
+          const dirPath = "fail-folder";
+          
+          // Mock directory exists
+          app.vault.adapter.exists = jest.fn().mockResolvedValue(true);
+          app.vault._files = [];
+          
+          // Mock file in directory
+          const file1 = new TFile();
+          file1.path = "fail-folder/file1.md";
+          app.vault._files = [file1];
+          
+          // Mock trash to fail
+          app.vault.trash = jest.fn().mockRejectedValue(new Error("Permission denied"));
+          
+          const response = await request(server)
+            .delete(`/vault/${dirPath}`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "directory")
+            .expect(500);
+            
+          expect(response.body.message).toEqual("Failed to delete directory: Permission denied");
+        });
+      });
     });
   });
 
@@ -808,6 +1072,107 @@ describe("requestHandler", () => {
           .expect(409);
           
         expect(response.body.message).toContain("Destination file already exists");
+      });
+    });
+
+    describe("file move operation", () => {
+      test("successful move with Operation: move, Target: path", async () => {
+        const oldPath = "folder1/file.md";
+        const newPath = "folder2/subfolder/file.md";
+        
+        // Mock file exists
+        const mockFile = new TFile();
+        app.vault._getAbstractFileByPath = mockFile;
+        app.vault.adapter._exists = false; // destination doesn't exist
+        
+        // Mock createFolder
+        app.vault.createFolder = jest.fn().mockResolvedValue(undefined);
+        
+        // Mock fileManager
+        (app as any).fileManager = {
+          renameFile: jest.fn().mockResolvedValue(undefined)
+        };
+        
+        const response = await request(server)
+          .patch(`/vault/${oldPath}`)
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "text/plain")
+          .set("Operation", "move")
+          .set("Target-Type", "file")
+          .set("Target", "path")
+          .send(newPath)
+          .expect(200);
+          
+        expect(response.body.message).toEqual("File successfully moved");
+        expect(response.body.oldPath).toEqual(oldPath);
+        expect(response.body.newPath).toEqual(newPath);
+        expect(app.vault.createFolder).toHaveBeenCalledWith("folder2/subfolder");
+        expect((app as any).fileManager.renameFile).toHaveBeenCalledWith(mockFile, newPath);
+      });
+
+      test("move fails with non-existent file", async () => {
+        // Mock file doesn't exist
+        app.vault._getAbstractFileByPath = null;
+        
+        const response = await request(server)
+          .patch("/vault/non-existent.md")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "text/plain")
+          .set("Operation", "move")
+          .set("Target-Type", "file")
+          .set("Target", "path")
+          .send("new-location/file.md")
+          .expect(404);
+      });
+
+      test("move fails when destination exists", async () => {
+        const oldPath = "folder/old-file.md";
+        const newPath = "existing/location/file.md";
+        
+        // Mock file exists
+        const mockFile = new TFile();
+        app.vault._getAbstractFileByPath = mockFile;
+        app.vault.adapter._exists = true; // destination already exists
+        
+        const response = await request(server)
+          .patch(`/vault/${oldPath}`)
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "text/plain")
+          .set("Operation", "move")
+          .set("Target-Type", "file")
+          .set("Target", "path")
+          .send(newPath)
+          .expect(409);
+          
+        expect(response.body.message).toContain("Destination file already exists");
+      });
+
+      test("move operation must use Target: path", async () => {
+        const response = await request(server)
+          .patch("/vault/file.md")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "text/plain")
+          .set("Operation", "move")
+          .set("Target-Type", "file")
+          .set("Target", "name") // Wrong target for move
+          .send("folder/file.md")
+          .expect(400);
+          
+        expect(response.body.message).toContain("move operation must use Target: path");
+      });
+
+      test("move operation only valid with file target type", async () => {
+        const response = await request(server)
+          .patch("/vault/file.md")
+          .set("Authorization", `Bearer ${API_KEY}`)
+          .set("Content-Type", "text/plain")
+          .set("Operation", "move")
+          .set("Target-Type", "heading") // Wrong target type
+          .set("Target", "path")
+          .send("new-path.md")
+          .expect(400);
+          
+        expect(response.body.message).toContain("Operation 'move' is only valid for Target-Type: file");
       });
     });
   });
