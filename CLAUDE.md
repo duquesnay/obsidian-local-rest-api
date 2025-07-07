@@ -162,6 +162,55 @@ curl -k https://127.0.0.1:27124/
 curl -k https://127.0.0.1:27124/commands/
 ```
 
+## Block Editing Examples
+
+The PATCH endpoint supports powerful block editing capabilities:
+
+### Replace Entire Block Content
+```bash
+# Completely replace a block's content
+curl -X PATCH https://localhost:27124/vault/myfile.md \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Target-Type: block" \
+  -H "Operation: replace" \
+  -H "Target: myblockid" \
+  -H "Content-Type: text/markdown" \
+  -d "This completely replaces the block content"
+```
+
+### Append to Block
+```bash
+# Add content after a block
+curl -X PATCH https://localhost:27124/vault/myfile.md \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Target-Type: block" \
+  -H "Operation: append" \
+  -H "Target: myblockid" \
+  -H "Content-Type: text/markdown" \
+  -d "\n\nAdditional content after the block"
+```
+
+### Prepend to Block
+```bash
+# Add content before a block
+curl -X PATCH https://localhost:27124/vault/myfile.md \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Target-Type: block" \
+  -H "Operation: prepend" \
+  -H "Target: myblockid" \
+  -H "Content-Type: text/markdown" \
+  -d "Content before the block\n\n"
+```
+
+### Other PATCH Operations
+
+The PATCH endpoint also supports:
+- **Heading operations**: Insert content at specific headings
+- **Frontmatter operations**: Update metadata fields
+- **File operations**: Rename or move files
+- **Directory operations**: Move entire directories
+- **Tag operations**: Add or remove tags from files
+
 ## Feature Backlog
 
 ### Directory Operations (Completed)
