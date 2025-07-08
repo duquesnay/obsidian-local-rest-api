@@ -136,6 +136,13 @@ paths:
               schema:
                 "$ref": "#/components/schemas/Error"
           description: "File or directory does not exist."
+        "405":
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: |
+            Your path references a directory instead of a file; this request method is valid only for updating files.
       summary: |
         Deletes the currently-active file in Obsidian.
       tags:
@@ -170,7 +177,7 @@ paths:
       description: |
         Inserts content into the currently-open note relative to a heading, block refeerence, or frontmatter field within that document.
         
-        Allows you to modify the content relative to a heading, block reference, or frontmatter field in your document.
+        Allows you to modify file content - insert, append, prepend, or replace content at specific targets (headings, blocks, frontmatter), or perform file operations (rename, move, tag management).
         
         Note that this API was changed in Version 3.0 of this extension and the earlier PATCH API is now deprecated. Requests made using the previous version of this API will continue to work until Version 4.0 is released.  See https://github.com/coddingtonbear/obsidian-local-rest-api/wiki/Changes-to-PATCH-requests-between-versions-2.0-and-3.0 for more details and migration instructions.
         
@@ -252,6 +259,19 @@ paths:
         The above would work just fine for `prepend` or `replace`, too, of course,
         but with different results.
         
+        ## Replace Entire Block Content
+        
+        If you wanted to completely replace the content of the block referenced by
+        "2d9b4a" with new content, you could send the following headers:
+        
+        - `Operation`: `replace`
+        - `Target-Type`: `block`
+        - `Target`: `2d9b4a`
+        - with the request body: `This is the new content that completely replaces "More random text."`
+        
+        This will replace the entire block content with your new text, which is useful
+        for updating specific sections of your document programmatically.
+        
         ## Append, Prepend, or Replace a Row or Rows to/in a Table Referenced by a Block Reference
         
         If you wanted to add a new city ("Chicago, IL") and population ("16") pair to the table above
@@ -326,6 +346,28 @@ paths:
         
         File rename and move operations preserve internal links within your vault.
         Directory move operations move all files within the directory while preserving links.
+        
+        ## Tag Management
+        
+        ### Adding a Tag to a File
+        
+        To add a tag to a file, use:
+        - `Operation`: `add`
+        - `Target-Type`: `tag`
+        - `Target`: `tagname` (without # prefix)
+        - Request body: empty
+        
+        The tag will be added to the frontmatter if it exists, otherwise as an inline tag at the end of the file.
+        
+        ### Removing a Tag from a File
+        
+        To remove a tag from a file, use:
+        - `Operation`: `remove`
+        - `Target-Type`: `tag`
+        - `Target`: `tagname` (without # prefix)
+        - Request body: empty
+        
+        This removes the tag from both inline occurrences and frontmatter.
       parameters:
         - description: "Patch operation to perform"
           in: "header"
@@ -338,8 +380,10 @@ paths:
               - "replace"
               - "rename"
               - "move"
+              - "add"
+              - "remove"
             type: "string"
-        - description: "Type of target to patch"
+        - description: "Type of target to patch - heading (insert at heading), block (modify block content), frontmatter (update metadata), file (rename/move), directory (move), tag (add/remove)"
           in: "header"
           name: "Target-Type"
           required: true
@@ -350,6 +394,7 @@ paths:
               - "frontmatter"
               - "file"
               - "directory"
+              - "tag"
             type: "string"
         - description: "Delimiter to use for nested targets (i.e. Headings)"
           in: "header"
@@ -370,6 +415,26 @@ paths:
           name: "Target"
           required: true
           schema:
+            type: "string"
+        - description: "If specified Target does not exist, create it?"
+          in: "header"
+          name: "Create-Target-If-Missing"
+          required: false
+          schema:
+            default: "false"
+            enum:
+              - "true"
+              - "false"
+            type: "string"
+        - description: "If patch data already exists in Target, apply patch anyway?"
+          in: "header"
+          name: "Apply-If-Content-Preexists"
+          required: false
+          schema:
+            default: "false"
+            enum:
+              - "true"
+              - "false"
             type: "string"
         - description: "Trim whitespace from Target before applying patch?"
           in: "header"
@@ -394,7 +459,7 @@ paths:
                 
                 something else here
               type: "string"
-        description: "Content you would like to insert."
+        description: "Content you would like to insert, append, prepend, or replace with. For replace operations on blocks, this will completely replace the block content."
         required: true
       responses:
         "200":
@@ -643,6 +708,13 @@ paths:
               schema:
                 "$ref": "#/components/schemas/Error"
           description: "File or directory does not exist."
+        "405":
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: |
+            Your path references a directory instead of a file; this request method is valid only for updating files.
       summary: |
         Delete the current periodic note for the specified period.
       tags:
@@ -686,7 +758,7 @@ paths:
       description: |
         Inserts content into the current periodic note for the specified period relative to a heading, block refeerence, or frontmatter field within that document.
         
-        Allows you to modify the content relative to a heading, block reference, or frontmatter field in your document.
+        Allows you to modify file content - insert, append, prepend, or replace content at specific targets (headings, blocks, frontmatter), or perform file operations (rename, move, tag management).
         
         Note that this API was changed in Version 3.0 of this extension and the earlier PATCH API is now deprecated. Requests made using the previous version of this API will continue to work until Version 4.0 is released.  See https://github.com/coddingtonbear/obsidian-local-rest-api/wiki/Changes-to-PATCH-requests-between-versions-2.0-and-3.0 for more details and migration instructions.
         
@@ -768,6 +840,19 @@ paths:
         The above would work just fine for `prepend` or `replace`, too, of course,
         but with different results.
         
+        ## Replace Entire Block Content
+        
+        If you wanted to completely replace the content of the block referenced by
+        "2d9b4a" with new content, you could send the following headers:
+        
+        - `Operation`: `replace`
+        - `Target-Type`: `block`
+        - `Target`: `2d9b4a`
+        - with the request body: `This is the new content that completely replaces "More random text."`
+        
+        This will replace the entire block content with your new text, which is useful
+        for updating specific sections of your document programmatically.
+        
         ## Append, Prepend, or Replace a Row or Rows to/in a Table Referenced by a Block Reference
         
         If you wanted to add a new city ("Chicago, IL") and population ("16") pair to the table above
@@ -842,6 +927,28 @@ paths:
         
         File rename and move operations preserve internal links within your vault.
         Directory move operations move all files within the directory while preserving links.
+        
+        ## Tag Management
+        
+        ### Adding a Tag to a File
+        
+        To add a tag to a file, use:
+        - `Operation`: `add`
+        - `Target-Type`: `tag`
+        - `Target`: `tagname` (without # prefix)
+        - Request body: empty
+        
+        The tag will be added to the frontmatter if it exists, otherwise as an inline tag at the end of the file.
+        
+        ### Removing a Tag from a File
+        
+        To remove a tag from a file, use:
+        - `Operation`: `remove`
+        - `Target-Type`: `tag`
+        - `Target`: `tagname` (without # prefix)
+        - Request body: empty
+        
+        This removes the tag from both inline occurrences and frontmatter.
       parameters:
         - description: "Patch operation to perform"
           in: "header"
@@ -854,8 +961,10 @@ paths:
               - "replace"
               - "rename"
               - "move"
+              - "add"
+              - "remove"
             type: "string"
-        - description: "Type of target to patch"
+        - description: "Type of target to patch - heading (insert at heading), block (modify block content), frontmatter (update metadata), file (rename/move), directory (move), tag (add/remove)"
           in: "header"
           name: "Target-Type"
           required: true
@@ -866,6 +975,7 @@ paths:
               - "frontmatter"
               - "file"
               - "directory"
+              - "tag"
             type: "string"
         - description: "Delimiter to use for nested targets (i.e. Headings)"
           in: "header"
@@ -886,6 +996,26 @@ paths:
           name: "Target"
           required: true
           schema:
+            type: "string"
+        - description: "If specified Target does not exist, create it?"
+          in: "header"
+          name: "Create-Target-If-Missing"
+          required: false
+          schema:
+            default: "false"
+            enum:
+              - "true"
+              - "false"
+            type: "string"
+        - description: "If patch data already exists in Target, apply patch anyway?"
+          in: "header"
+          name: "Apply-If-Content-Preexists"
+          required: false
+          schema:
+            default: "false"
+            enum:
+              - "true"
+              - "false"
             type: "string"
         - description: "Trim whitespace from Target before applying patch?"
           in: "header"
@@ -923,7 +1053,7 @@ paths:
                 
                 something else here
               type: "string"
-        description: "Content you would like to insert."
+        description: "Content you would like to insert, append, prepend, or replace with. For replace operations on blocks, this will completely replace the block content."
         required: true
       responses:
         "200":
@@ -1120,6 +1250,13 @@ paths:
               schema:
                 "$ref": "#/components/schemas/Error"
           description: "File or directory does not exist."
+        "405":
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: |
+            Your path references a directory instead of a file; this request method is valid only for updating files.
       summary: |
         Delete the periodic note for the specified period and date.
       tags:
@@ -1181,7 +1318,7 @@ paths:
       description: |
         Inserts content into a periodic note relative to a heading, block refeerence, or frontmatter field within that document.
         
-        Allows you to modify the content relative to a heading, block reference, or frontmatter field in your document.
+        Allows you to modify file content - insert, append, prepend, or replace content at specific targets (headings, blocks, frontmatter), or perform file operations (rename, move, tag management).
         
         Note that this API was changed in Version 3.0 of this extension and the earlier PATCH API is now deprecated. Requests made using the previous version of this API will continue to work until Version 4.0 is released.  See https://github.com/coddingtonbear/obsidian-local-rest-api/wiki/Changes-to-PATCH-requests-between-versions-2.0-and-3.0 for more details and migration instructions.
         
@@ -1263,6 +1400,19 @@ paths:
         The above would work just fine for `prepend` or `replace`, too, of course,
         but with different results.
         
+        ## Replace Entire Block Content
+        
+        If you wanted to completely replace the content of the block referenced by
+        "2d9b4a" with new content, you could send the following headers:
+        
+        - `Operation`: `replace`
+        - `Target-Type`: `block`
+        - `Target`: `2d9b4a`
+        - with the request body: `This is the new content that completely replaces "More random text."`
+        
+        This will replace the entire block content with your new text, which is useful
+        for updating specific sections of your document programmatically.
+        
         ## Append, Prepend, or Replace a Row or Rows to/in a Table Referenced by a Block Reference
         
         If you wanted to add a new city ("Chicago, IL") and population ("16") pair to the table above
@@ -1337,6 +1487,28 @@ paths:
         
         File rename and move operations preserve internal links within your vault.
         Directory move operations move all files within the directory while preserving links.
+        
+        ## Tag Management
+        
+        ### Adding a Tag to a File
+        
+        To add a tag to a file, use:
+        - `Operation`: `add`
+        - `Target-Type`: `tag`
+        - `Target`: `tagname` (without # prefix)
+        - Request body: empty
+        
+        The tag will be added to the frontmatter if it exists, otherwise as an inline tag at the end of the file.
+        
+        ### Removing a Tag from a File
+        
+        To remove a tag from a file, use:
+        - `Operation`: `remove`
+        - `Target-Type`: `tag`
+        - `Target`: `tagname` (without # prefix)
+        - Request body: empty
+        
+        This removes the tag from both inline occurrences and frontmatter.
       parameters:
         - description: "Patch operation to perform"
           in: "header"
@@ -1349,8 +1521,10 @@ paths:
               - "replace"
               - "rename"
               - "move"
+              - "add"
+              - "remove"
             type: "string"
-        - description: "Type of target to patch"
+        - description: "Type of target to patch - heading (insert at heading), block (modify block content), frontmatter (update metadata), file (rename/move), directory (move), tag (add/remove)"
           in: "header"
           name: "Target-Type"
           required: true
@@ -1361,6 +1535,7 @@ paths:
               - "frontmatter"
               - "file"
               - "directory"
+              - "tag"
             type: "string"
         - description: "Delimiter to use for nested targets (i.e. Headings)"
           in: "header"
@@ -1381,6 +1556,26 @@ paths:
           name: "Target"
           required: true
           schema:
+            type: "string"
+        - description: "If specified Target does not exist, create it?"
+          in: "header"
+          name: "Create-Target-If-Missing"
+          required: false
+          schema:
+            default: "false"
+            enum:
+              - "true"
+              - "false"
+            type: "string"
+        - description: "If patch data already exists in Target, apply patch anyway?"
+          in: "header"
+          name: "Apply-If-Content-Preexists"
+          required: false
+          schema:
+            default: "false"
+            enum:
+              - "true"
+              - "false"
             type: "string"
         - description: "Trim whitespace from Target before applying patch?"
           in: "header"
@@ -1436,7 +1631,7 @@ paths:
                 
                 something else here
               type: "string"
-        description: "Content you would like to insert."
+        description: "Content you would like to insert, append, prepend, or replace with. For replace operations on blocks, this will completely replace the block content."
         required: true
       responses:
         "200":
@@ -1774,6 +1969,176 @@ paths:
         Search for documents matching a specified text query
       tags:
         - "Search"
+  /tags/:
+    get:
+      description: |
+        Returns all unique tags found in the vault, including both inline tags (#tag) and frontmatter tags. Each tag includes usage counts and file counts.
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                properties:
+                  tags:
+                    items:
+                      properties:
+                        count:
+                          description: "Total occurrences of this tag across all files"
+                          type: "number"
+                        files:
+                          description: "Number of files containing this tag"
+                          type: "number"
+                        tag:
+                          description: "Tag name (without # prefix)"
+                          type: "string"
+                      type: "object"
+                    type: "array"
+                  totalTags:
+                    description: "Total number of unique tags"
+                    type: "number"
+                type: "object"
+          description: "Success"
+      summary: |
+        List all unique tags in the vault
+      tags:
+        - "Tags"
+  "/tags/{tagname}/":
+    get:
+      description: |
+        Returns all files that contain the specified tag, either as inline tags or in frontmatter. Includes occurrence counts for each file.
+      parameters:
+        - description: "Tag name to search for (with or without # prefix)"
+          in: "path"
+          name: "tagname"
+          required: true
+          schema:
+            type: "string"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                properties:
+                  files:
+                    items:
+                      properties:
+                        occurrences:
+                          description: "Number of times the tag appears in this file"
+                          type: "number"
+                        path:
+                          description: "Path to the file"
+                          type: "string"
+                      type: "object"
+                    type: "array"
+                  tag:
+                    description: "The tag that was searched"
+                    type: "string"
+                  totalFiles:
+                    description: "Total number of files containing this tag"
+                    type: "number"
+                  totalOccurrences:
+                    description: "Total occurrences across all files"
+                    type: "number"
+                type: "object"
+          description: "Success"
+        "404":
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "Tag not found in any files"
+      summary: |
+        Get files containing a specific tag
+      tags:
+        - "Tags"
+    patch:
+      description: |
+        Renames a tag throughout the vault, updating both inline tags and frontmatter tags. This is a vault-wide operation that modifies all files containing the tag.
+      parameters:
+        - description: "Current tag name to rename (with or without # prefix)"
+          in: "path"
+          name: "tagname"
+          required: true
+          schema:
+            type: "string"
+        - description: "Must be \"rename\" for tag renaming"
+          in: "header"
+          name: "Operation"
+          required: true
+          schema:
+            enum:
+              - "rename"
+            type: "string"
+        - description: "New tag name (with or without # prefix)"
+          in: "header"
+          name: "Target"
+          required: true
+          schema:
+            type: "string"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                properties:
+                  message:
+                    type: "string"
+                  modifiedCount:
+                    type: "number"
+                  modifiedFiles:
+                    items:
+                      type: "string"
+                    type: "array"
+                  newTag:
+                    type: "string"
+                  oldTag:
+                    type: "string"
+                type: "object"
+          description: "Tag successfully renamed"
+        "207":
+          content:
+            application/json:
+              schema:
+                properties:
+                  errors:
+                    items:
+                      properties:
+                        error:
+                          type: "string"
+                        file:
+                          type: "string"
+                      type: "object"
+                    type: "array"
+                  message:
+                    type: "string"
+                  modifiedCount:
+                    type: "number"
+                  modifiedFiles:
+                    items:
+                      type: "string"
+                    type: "array"
+                  newTag:
+                    type: "string"
+                  oldTag:
+                    type: "string"
+                type: "object"
+          description: "Tag rename completed with errors"
+        "400":
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "Invalid request"
+        "404":
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "Tag not found"
+      summary: |
+        Rename a tag across the entire vault
+      tags:
+        - "Tags"
   /vault/:
     get:
       description: |
@@ -1852,6 +2217,13 @@ paths:
               schema:
                 "$ref": "#/components/schemas/Error"
           description: "File or directory does not exist."
+        "405":
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: |
+            Your path references a directory instead of a file; this request method is valid only for updating files.
       summary: |
         Delete a particular file or directory in your vault.
       tags:
@@ -1894,7 +2266,7 @@ paths:
       description: |
         Inserts content into an existing note relative to a heading, block refeerence, or frontmatter field within that document.
         
-        Allows you to modify the content relative to a heading, block reference, or frontmatter field in your document.
+        Allows you to modify file content - insert, append, prepend, or replace content at specific targets (headings, blocks, frontmatter), or perform file operations (rename, move, tag management).
         
         Note that this API was changed in Version 3.0 of this extension and the earlier PATCH API is now deprecated. Requests made using the previous version of this API will continue to work until Version 4.0 is released.  See https://github.com/coddingtonbear/obsidian-local-rest-api/wiki/Changes-to-PATCH-requests-between-versions-2.0-and-3.0 for more details and migration instructions.
         
@@ -1976,6 +2348,19 @@ paths:
         The above would work just fine for `prepend` or `replace`, too, of course,
         but with different results.
         
+        ## Replace Entire Block Content
+        
+        If you wanted to completely replace the content of the block referenced by
+        "2d9b4a" with new content, you could send the following headers:
+        
+        - `Operation`: `replace`
+        - `Target-Type`: `block`
+        - `Target`: `2d9b4a`
+        - with the request body: `This is the new content that completely replaces "More random text."`
+        
+        This will replace the entire block content with your new text, which is useful
+        for updating specific sections of your document programmatically.
+        
         ## Append, Prepend, or Replace a Row or Rows to/in a Table Referenced by a Block Reference
         
         If you wanted to add a new city ("Chicago, IL") and population ("16") pair to the table above
@@ -2050,6 +2435,28 @@ paths:
         
         File rename and move operations preserve internal links within your vault.
         Directory move operations move all files within the directory while preserving links.
+        
+        ## Tag Management
+        
+        ### Adding a Tag to a File
+        
+        To add a tag to a file, use:
+        - `Operation`: `add`
+        - `Target-Type`: `tag`
+        - `Target`: `tagname` (without # prefix)
+        - Request body: empty
+        
+        The tag will be added to the frontmatter if it exists, otherwise as an inline tag at the end of the file.
+        
+        ### Removing a Tag from a File
+        
+        To remove a tag from a file, use:
+        - `Operation`: `remove`
+        - `Target-Type`: `tag`
+        - `Target`: `tagname` (without # prefix)
+        - Request body: empty
+        
+        This removes the tag from both inline occurrences and frontmatter.
       parameters:
         - description: "Patch operation to perform"
           in: "header"
@@ -2062,8 +2469,10 @@ paths:
               - "replace"
               - "rename"
               - "move"
+              - "add"
+              - "remove"
             type: "string"
-        - description: "Type of target to patch"
+        - description: "Type of target to patch - heading (insert at heading), block (modify block content), frontmatter (update metadata), file (rename/move), directory (move), tag (add/remove)"
           in: "header"
           name: "Target-Type"
           required: true
@@ -2074,6 +2483,7 @@ paths:
               - "frontmatter"
               - "file"
               - "directory"
+              - "tag"
             type: "string"
         - description: "Delimiter to use for nested targets (i.e. Headings)"
           in: "header"
@@ -2094,6 +2504,26 @@ paths:
           name: "Target"
           required: true
           schema:
+            type: "string"
+        - description: "If specified Target does not exist, create it?"
+          in: "header"
+          name: "Create-Target-If-Missing"
+          required: false
+          schema:
+            default: "false"
+            enum:
+              - "true"
+              - "false"
+            type: "string"
+        - description: "If patch data already exists in Target, apply patch anyway?"
+          in: "header"
+          name: "Apply-If-Content-Preexists"
+          required: false
+          schema:
+            default: "false"
+            enum:
+              - "true"
+              - "false"
             type: "string"
         - description: "Trim whitespace from Target before applying patch?"
           in: "header"
@@ -2126,7 +2556,7 @@ paths:
                 
                 something else here
               type: "string"
-        description: "Content you would like to insert."
+        description: "Content you would like to insert, append, prepend, or replace with. For replace operations on blocks, this will completely replace the block content."
         required: true
       responses:
         "200":

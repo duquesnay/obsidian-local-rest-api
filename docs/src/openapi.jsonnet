@@ -650,6 +650,234 @@ std.manifestYamlDoc(
           },
         },
       },
+      '/tags/': {
+        get: {
+          tags: [
+            'Tags',
+          ],
+          summary: 'List all unique tags in the vault\n',
+          description: 'Returns all unique tags found in the vault, including both inline tags (#tag) and frontmatter tags. Each tag includes usage counts and file counts.\n',
+          responses: {
+            '200': {
+              description: 'Success',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      tags: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            tag: {
+                              type: 'string',
+                              description: 'Tag name (without # prefix)'
+                            },
+                            count: {
+                              type: 'number',
+                              description: 'Total occurrences of this tag across all files'
+                            },
+                            files: {
+                              type: 'number',
+                              description: 'Number of files containing this tag'
+                            }
+                          }
+                        }
+                      },
+                      totalTags: {
+                        type: 'number',
+                        description: 'Total number of unique tags'
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      '/tags/{tagname}/': {
+        get: {
+          tags: [
+            'Tags',
+          ],
+          summary: 'Get files containing a specific tag\n',
+          description: 'Returns all files that contain the specified tag, either as inline tags or in frontmatter. Includes occurrence counts for each file.\n',
+          parameters: [
+            {
+              name: 'tagname',
+              'in': 'path',
+              description: 'Tag name to search for (with or without # prefix)',
+              required: true,
+              schema: {
+                type: 'string'
+              }
+            }
+          ],
+          responses: {
+            '200': {
+              description: 'Success',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      tag: {
+                        type: 'string',
+                        description: 'The tag that was searched'
+                      },
+                      files: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            path: {
+                              type: 'string',
+                              description: 'Path to the file'
+                            },
+                            occurrences: {
+                              type: 'number',
+                              description: 'Number of times the tag appears in this file'
+                            }
+                          }
+                        }
+                      },
+                      totalFiles: {
+                        type: 'number',
+                        description: 'Total number of files containing this tag'
+                      },
+                      totalOccurrences: {
+                        type: 'number',
+                        description: 'Total occurrences across all files'
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            '404': {
+              description: 'Tag not found in any files',
+              content: {
+                'application/json': {
+                  schema: {
+                    '$ref': '#/components/schemas/Error',
+                  },
+                },
+              },
+            }
+          }
+        },
+        patch: {
+          tags: [
+            'Tags',
+          ],
+          summary: 'Rename a tag across the entire vault\n',
+          description: 'Renames a tag throughout the vault, updating both inline tags and frontmatter tags. This is a vault-wide operation that modifies all files containing the tag.\n',
+          parameters: [
+            {
+              name: 'tagname',
+              'in': 'path',
+              description: 'Current tag name to rename (with or without # prefix)',
+              required: true,
+              schema: {
+                type: 'string'
+              }
+            },
+            {
+              name: 'Operation',
+              'in': 'header',
+              description: 'Must be "rename" for tag renaming',
+              required: true,
+              schema: {
+                type: 'string',
+                enum: ['rename']
+              }
+            },
+            {
+              name: 'Target',
+              'in': 'header',
+              description: 'New tag name (with or without # prefix)',
+              required: true,
+              schema: {
+                type: 'string'
+              }
+            }
+          ],
+          responses: {
+            '200': {
+              description: 'Tag successfully renamed',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      message: { type: 'string' },
+                      oldTag: { type: 'string' },
+                      newTag: { type: 'string' },
+                      modifiedFiles: {
+                        type: 'array',
+                        items: { type: 'string' }
+                      },
+                      modifiedCount: { type: 'number' }
+                    }
+                  }
+                }
+              }
+            },
+            '207': {
+              description: 'Tag rename completed with errors',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      message: { type: 'string' },
+                      oldTag: { type: 'string' },
+                      newTag: { type: 'string' },
+                      modifiedFiles: {
+                        type: 'array',
+                        items: { type: 'string' }
+                      },
+                      modifiedCount: { type: 'number' },
+                      errors: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            file: { type: 'string' },
+                            'error': { type: 'string' }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            '400': {
+              description: 'Invalid request',
+              content: {
+                'application/json': {
+                  schema: {
+                    '$ref': '#/components/schemas/Error',
+                  },
+                },
+              },
+            },
+            '404': {
+              description: 'Tag not found',
+              content: {
+                'application/json': {
+                  schema: {
+                    '$ref': '#/components/schemas/Error',
+                  },
+                },
+              },
+            }
+          }
+        }
+      },
       '/open/{filename}': {
         post: {
           tags: [
