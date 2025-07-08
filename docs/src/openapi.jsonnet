@@ -567,6 +567,185 @@ std.manifestYamlDoc(
           },
         },
       },
+      '/search/advanced/': {
+        post: {
+          tags: [
+            'Search',
+          ],
+          summary: 'Advanced search with comprehensive filtering options\n',
+          description: 'Perform advanced searches with multiple filter criteria including content, frontmatter, file metadata, and tags.\n\n## Query Structure\n\nThe request body should be a JSON object with the following structure:\n\n```json\n{\n  "filters": {\n    "content": {\n      "query": "search text",\n      "regex": "pattern.*",\n      "caseSensitive": false\n    },\n    "frontmatter": {\n      "fieldName": {\n        "operator": "equals",\n        "value": "desired value"\n      }\n    },\n    "file": {\n      "path": {\n        "pattern": "folder/**/*.md"\n      },\n      "size": {\n        "min": 1000,\n        "max": 50000\n      },\n      "modified": {\n        "after": "2024-01-01T00:00:00Z"\n      }\n    },\n    "tags": {\n      "include": ["tag1", "tag2"],\n      "exclude": ["tag3"],\n      "mode": "all"\n    }\n  },\n  "options": {\n    "limit": 100,\n    "offset": 0,\n    "contextLength": 100,\n    "includeContent": false,\n    "sort": {\n      "field": "relevance",\n      "direction": "desc"\n    }\n  }\n}\n```\n\n## Available Operators for Frontmatter\n\n- `equals`: Exact match\n- `contains`: Substring match\n- `gt`, `lt`, `gte`, `lte`: Numeric comparisons\n- `exists`, `not_exists`: Field presence checks\n',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    filters: {
+                      type: 'object',
+                      properties: {
+                        content: {
+                          type: 'object',
+                          properties: {
+                            query: { type: 'string' },
+                            regex: { type: 'string' },
+                            caseSensitive: { type: 'boolean' }
+                          }
+                        },
+                        frontmatter: {
+                          type: 'object',
+                          additionalProperties: {
+                            type: 'object',
+                            properties: {
+                              operator: {
+                                type: 'string',
+                                enum: ['equals', 'contains', 'gt', 'lt', 'gte', 'lte', 'exists', 'not_exists']
+                              },
+                              value: {}
+                            }
+                          }
+                        },
+                        file: {
+                          type: 'object',
+                          properties: {
+                            path: {
+                              type: 'object',
+                              properties: {
+                                pattern: { type: 'string' },
+                                regex: { type: 'string' }
+                              }
+                            },
+                            extension: {
+                              type: 'array',
+                              items: { type: 'string' }
+                            },
+                            size: {
+                              type: 'object',
+                              properties: {
+                                min: { type: 'number' },
+                                max: { type: 'number' }
+                              }
+                            },
+                            created: {
+                              type: 'object',
+                              properties: {
+                                after: { type: 'string' },
+                                before: { type: 'string' }
+                              }
+                            },
+                            modified: {
+                              type: 'object',
+                              properties: {
+                                after: { type: 'string' },
+                                before: { type: 'string' }
+                              }
+                            }
+                          }
+                        },
+                        tags: {
+                          type: 'object',
+                          properties: {
+                            include: {
+                              type: 'array',
+                              items: { type: 'string' }
+                            },
+                            exclude: {
+                              type: 'array',
+                              items: { type: 'string' }
+                            },
+                            mode: {
+                              type: 'string',
+                              enum: ['all', 'any']
+                            }
+                          }
+                        }
+                      }
+                    },
+                    options: {
+                      type: 'object',
+                      properties: {
+                        limit: { type: 'number' },
+                        offset: { type: 'number' },
+                        contextLength: { type: 'number' },
+                        includeContent: { type: 'boolean' },
+                        sort: {
+                          type: 'object',
+                          properties: {
+                            field: {
+                              type: 'string',
+                              enum: ['name', 'modified', 'created', 'size', 'relevance']
+                            },
+                            direction: {
+                              type: 'string',
+                              enum: ['asc', 'desc']
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  required: ['filters']
+                }
+              }
+            }
+          },
+          responses: {
+            '200': {
+              description: 'Success',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      results: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            path: { type: 'string' },
+                            score: { type: 'number' },
+                            matches: {
+                              type: 'array',
+                              items: {
+                                type: 'object',
+                                properties: {
+                                  type: { type: 'string' },
+                                  match: {
+                                    type: 'object',
+                                    properties: {
+                                      start: { type: 'number' },
+                                      end: { type: 'number' }
+                                    }
+                                  },
+                                  context: { type: 'string' }
+                                }
+                              }
+                            },
+                            content: { type: 'string' },
+                            metadata: { type: 'object' }
+                          }
+                        }
+                      },
+                      totalCount: { type: 'number' },
+                      hasMore: { type: 'boolean' }
+                    }
+                  }
+                }
+              }
+            },
+            '400': {
+              description: 'Invalid search query',
+              content: {
+                'application/json': {
+                  schema: {
+                    '$ref': '#/components/schemas/Error',
+                  },
+                },
+              },
+            }
+          }
+        }
+      },
       '/search/simple/': {
         post: {
           tags: [

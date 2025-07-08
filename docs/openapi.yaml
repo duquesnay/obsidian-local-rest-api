@@ -1914,6 +1914,233 @@ paths:
         Search for documents matching a specified search query
       tags:
         - "Search"
+  /search/advanced/:
+    post:
+      description: |
+        Perform advanced searches with multiple filter criteria including content, frontmatter, file metadata, and tags.
+        
+        ## Query Structure
+        
+        The request body should be a JSON object with the following structure:
+        
+        ```json
+        {
+          "filters": {
+            "content": {
+              "query": "search text",
+              "regex": "pattern.*",
+              "caseSensitive": false
+            },
+            "frontmatter": {
+              "fieldName": {
+                "operator": "equals",
+                "value": "desired value"
+              }
+            },
+            "file": {
+              "path": {
+                "pattern": "folder/**/*.md"
+              },
+              "size": {
+                "min": 1000,
+                "max": 50000
+              },
+              "modified": {
+                "after": "2024-01-01T00:00:00Z"
+              }
+            },
+            "tags": {
+              "include": ["tag1", "tag2"],
+              "exclude": ["tag3"],
+              "mode": "all"
+            }
+          },
+          "options": {
+            "limit": 100,
+            "offset": 0,
+            "contextLength": 100,
+            "includeContent": false,
+            "sort": {
+              "field": "relevance",
+              "direction": "desc"
+            }
+          }
+        }
+        ```
+        
+        ## Available Operators for Frontmatter
+        
+        - `equals`: Exact match
+        - `contains`: Substring match
+        - `gt`, `lt`, `gte`, `lte`: Numeric comparisons
+        - `exists`, `not_exists`: Field presence checks
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                filters:
+                  properties:
+                    content:
+                      properties:
+                        caseSensitive:
+                          type: "boolean"
+                        query:
+                          type: "string"
+                        regex:
+                          type: "string"
+                      type: "object"
+                    file:
+                      properties:
+                        created:
+                          properties:
+                            after:
+                              type: "string"
+                            before:
+                              type: "string"
+                          type: "object"
+                        extension:
+                          items:
+                            type: "string"
+                          type: "array"
+                        modified:
+                          properties:
+                            after:
+                              type: "string"
+                            before:
+                              type: "string"
+                          type: "object"
+                        path:
+                          properties:
+                            pattern:
+                              type: "string"
+                            regex:
+                              type: "string"
+                          type: "object"
+                        size:
+                          properties:
+                            max:
+                              type: "number"
+                            min:
+                              type: "number"
+                          type: "object"
+                      type: "object"
+                    frontmatter:
+                      additionalProperties:
+                        properties:
+                          operator:
+                            enum:
+                              - "equals"
+                              - "contains"
+                              - "gt"
+                              - "lt"
+                              - "gte"
+                              - "lte"
+                              - "exists"
+                              - "not_exists"
+                            type: "string"
+                          value: {}
+                        type: "object"
+                      type: "object"
+                    tags:
+                      properties:
+                        exclude:
+                          items:
+                            type: "string"
+                          type: "array"
+                        include:
+                          items:
+                            type: "string"
+                          type: "array"
+                        mode:
+                          enum:
+                            - "all"
+                            - "any"
+                          type: "string"
+                      type: "object"
+                  type: "object"
+                options:
+                  properties:
+                    contextLength:
+                      type: "number"
+                    includeContent:
+                      type: "boolean"
+                    limit:
+                      type: "number"
+                    offset:
+                      type: "number"
+                    sort:
+                      properties:
+                        direction:
+                          enum:
+                            - "asc"
+                            - "desc"
+                          type: "string"
+                        field:
+                          enum:
+                            - "name"
+                            - "modified"
+                            - "created"
+                            - "size"
+                            - "relevance"
+                          type: "string"
+                      type: "object"
+                  type: "object"
+              required:
+                - "filters"
+              type: "object"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                properties:
+                  hasMore:
+                    type: "boolean"
+                  results:
+                    items:
+                      properties:
+                        content:
+                          type: "string"
+                        matches:
+                          items:
+                            properties:
+                              context:
+                                type: "string"
+                              match:
+                                properties:
+                                  end:
+                                    type: "number"
+                                  start:
+                                    type: "number"
+                                type: "object"
+                              type:
+                                type: "string"
+                            type: "object"
+                          type: "array"
+                        metadata:
+                          type: "object"
+                        path:
+                          type: "string"
+                        score:
+                          type: "number"
+                      type: "object"
+                    type: "array"
+                  totalCount:
+                    type: "number"
+                type: "object"
+          description: "Success"
+        "400":
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+          description: "Invalid search query"
+      summary: |
+        Advanced search with comprehensive filtering options
+      tags:
+        - "Search"
   /search/simple/:
     post:
       parameters:
