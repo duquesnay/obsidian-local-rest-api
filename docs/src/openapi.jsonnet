@@ -1057,6 +1057,234 @@ std.manifestYamlDoc(
           }
         }
       },
+      '/links/': {
+        get: {
+          tags: [
+            'Links',
+          ],
+          summary: 'Get all links in the vault\n',
+          description: 'Returns a comprehensive list of all links found across the vault, including source file, target, and link statistics.\n',
+          responses: {
+            '200': {
+              description: 'Success',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      links: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            source: {
+                              type: 'string',
+                              description: 'Path to the file containing the link'
+                            },
+                            target: {
+                              type: 'string',
+                              description: 'Target of the link'
+                            },
+                            original: {
+                              type: 'string',
+                              description: 'Original link text as it appears in the file'
+                            },
+                            displayText: {
+                              type: 'string',
+                              description: 'Display text for the link (if different from target)'
+                            },
+                            position: {
+                              type: 'object',
+                              properties: {
+                                start: {
+                                  type: 'object',
+                                  properties: {
+                                    line: { type: 'number' },
+                                    col: { type: 'number' },
+                                    offset: { type: 'number' }
+                                  }
+                                },
+                                end: {
+                                  type: 'object',
+                                  properties: {
+                                    line: { type: 'number' },
+                                    col: { type: 'number' },
+                                    offset: { type: 'number' }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      statistics: {
+                        type: 'object',
+                        properties: {
+                          totalLinks: {
+                            type: 'number',
+                            description: 'Total number of links in the vault'
+                          },
+                          totalFiles: {
+                            type: 'number',
+                            description: 'Total number of files in the vault'
+                          },
+                          filesWithLinks: {
+                            type: 'number',
+                            description: 'Number of files containing at least one link'
+                          },
+                          orphanedFiles: {
+                            type: 'number',
+                            description: 'Number of files with no incoming links'
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      '/links/broken/': {
+        get: {
+          tags: [
+            'Links',
+          ],
+          summary: 'Get all broken links in the vault\n',
+          description: 'Returns all links that point to non-existent files, along with suggestions for potential matches.\n',
+          responses: {
+            '200': {
+              description: 'Success',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      brokenLinks: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            source: {
+                              type: 'string',
+                              description: 'Path to the file containing the broken link'
+                            },
+                            target: {
+                              type: 'string',
+                              description: 'Target of the broken link'
+                            },
+                            original: {
+                              type: 'string',
+                              description: 'Original link text'
+                            },
+                            displayText: {
+                              type: 'string',
+                              description: 'Display text for the link'
+                            },
+                            resolvedTarget: {
+                              type: 'string',
+                              description: 'Resolved path that was checked'
+                            },
+                            suggestions: {
+                              type: 'array',
+                              items: {
+                                type: 'string'
+                              },
+                              description: 'Suggested files with similar names'
+                            },
+                            position: {
+                              type: 'object',
+                              properties: {
+                                start: {
+                                  type: 'object',
+                                  properties: {
+                                    line: { type: 'number' },
+                                    col: { type: 'number' },
+                                    offset: { type: 'number' }
+                                  }
+                                },
+                                end: {
+                                  type: 'object',
+                                  properties: {
+                                    line: { type: 'number' },
+                                    col: { type: 'number' },
+                                    offset: { type: 'number' }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      count: {
+                        type: 'number',
+                        description: 'Total number of broken links'
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      '/links/orphaned/': {
+        get: {
+          tags: [
+            'Links',
+          ],
+          summary: 'Get all orphaned files in the vault\n',
+          description: 'Returns all files that have no incoming links from other files in the vault.\n',
+          responses: {
+            '200': {
+              description: 'Success',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      orphanedFiles: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            path: {
+                              type: 'string',
+                              description: 'Path to the orphaned file'
+                            },
+                            metadata: {
+                              type: 'object',
+                              properties: {
+                                size: {
+                                  type: 'number',
+                                  description: 'File size in bytes'
+                                },
+                                created: {
+                                  type: 'number',
+                                  description: 'Creation timestamp'
+                                },
+                                modified: {
+                                  type: 'number',
+                                  description: 'Last modified timestamp'
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      count: {
+                        type: 'number',
+                        description: 'Total number of orphaned files'
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
       '/open/{filename}': {
         post: {
           tags: [

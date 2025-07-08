@@ -612,6 +612,179 @@ paths:
         Execute a command.
       tags:
         - "Commands"
+  /links/:
+    get:
+      description: |
+        Returns a comprehensive list of all links found across the vault, including source file, target, and link statistics.
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                properties:
+                  links:
+                    items:
+                      properties:
+                        displayText:
+                          description: "Display text for the link (if different from target)"
+                          type: "string"
+                        original:
+                          description: "Original link text as it appears in the file"
+                          type: "string"
+                        position:
+                          properties:
+                            end:
+                              properties:
+                                col:
+                                  type: "number"
+                                line:
+                                  type: "number"
+                                offset:
+                                  type: "number"
+                              type: "object"
+                            start:
+                              properties:
+                                col:
+                                  type: "number"
+                                line:
+                                  type: "number"
+                                offset:
+                                  type: "number"
+                              type: "object"
+                          type: "object"
+                        source:
+                          description: "Path to the file containing the link"
+                          type: "string"
+                        target:
+                          description: "Target of the link"
+                          type: "string"
+                      type: "object"
+                    type: "array"
+                  statistics:
+                    properties:
+                      filesWithLinks:
+                        description: "Number of files containing at least one link"
+                        type: "number"
+                      orphanedFiles:
+                        description: "Number of files with no incoming links"
+                        type: "number"
+                      totalFiles:
+                        description: "Total number of files in the vault"
+                        type: "number"
+                      totalLinks:
+                        description: "Total number of links in the vault"
+                        type: "number"
+                    type: "object"
+                type: "object"
+          description: "Success"
+      summary: |
+        Get all links in the vault
+      tags:
+        - "Links"
+  /links/broken/:
+    get:
+      description: |
+        Returns all links that point to non-existent files, along with suggestions for potential matches.
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                properties:
+                  brokenLinks:
+                    items:
+                      properties:
+                        displayText:
+                          description: "Display text for the link"
+                          type: "string"
+                        original:
+                          description: "Original link text"
+                          type: "string"
+                        position:
+                          properties:
+                            end:
+                              properties:
+                                col:
+                                  type: "number"
+                                line:
+                                  type: "number"
+                                offset:
+                                  type: "number"
+                              type: "object"
+                            start:
+                              properties:
+                                col:
+                                  type: "number"
+                                line:
+                                  type: "number"
+                                offset:
+                                  type: "number"
+                              type: "object"
+                          type: "object"
+                        resolvedTarget:
+                          description: "Resolved path that was checked"
+                          type: "string"
+                        source:
+                          description: "Path to the file containing the broken link"
+                          type: "string"
+                        suggestions:
+                          description: "Suggested files with similar names"
+                          items:
+                            type: "string"
+                          type: "array"
+                        target:
+                          description: "Target of the broken link"
+                          type: "string"
+                      type: "object"
+                    type: "array"
+                  count:
+                    description: "Total number of broken links"
+                    type: "number"
+                type: "object"
+          description: "Success"
+      summary: |
+        Get all broken links in the vault
+      tags:
+        - "Links"
+  /links/orphaned/:
+    get:
+      description: |
+        Returns all files that have no incoming links from other files in the vault.
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                properties:
+                  count:
+                    description: "Total number of orphaned files"
+                    type: "number"
+                  orphanedFiles:
+                    items:
+                      properties:
+                        metadata:
+                          properties:
+                            created:
+                              description: "Creation timestamp"
+                              type: "number"
+                            modified:
+                              description: "Last modified timestamp"
+                              type: "number"
+                            size:
+                              description: "File size in bytes"
+                              type: "number"
+                          type: "object"
+                        path:
+                          description: "Path to the orphaned file"
+                          type: "string"
+                      type: "object"
+                    type: "array"
+                type: "object"
+          description: "Success"
+      summary: |
+        Get all orphaned files in the vault
+      tags:
+        - "Links"
   /obsidian-local-rest-api.crt:
     get:
       responses:
