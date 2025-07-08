@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(GIT_SEQUENCE_EDITOR=/tmp/rebase_move1.sh git rebase -i 4a71bb6^)",
+      "Bash(mkdir:*)",
+      "Bash(GIT_SEQUENCE_EDITOR=/tmp/reorder_script.sh git rebase -i 4a71bb6^)",
+      "Bash(rg:*)",
+      "Bash(cp:*)",
+      "Bash(rm:*)",
+      "Bash(ls:*)"
+    ],
+    "deny": [],
+    "allowedDirectories": [
+      "/tmp/worktrees",
+      "/tmp/"
+    ]
+  }
+}
