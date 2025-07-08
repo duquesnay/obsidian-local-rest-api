@@ -340,3 +340,23 @@ All directory operations have been implemented:
 - Shell scripts avoid Claude Code permission prompt issues and enable complex piped commands
 - Create reusable development workflows in `scripts/` directory
 - Document scripts with clear purposes for team knowledge sharing
+
+### 2025-07-08 - Branch History Reorganization and Preservation Strategy
+**Methodological:**
+- Pre-transition analysis prevents work loss: Before making major branch changes, systematically analyzing what exists in each branch (`git log --oneline main --not clean-history`) and categorizing commits by importance (documentation, settings, fixes) ensures nothing critical is lost. This "inventory first, then act" approach is much safer than assuming branches contain the same work.
+
+**Technical:**
+- Cherry-pick workflow for branch consolidation: When merging work from different branches with conflicts, the pattern of (1) create backup branch, (2) reset target branch, (3) cherry-pick important commits, (4) handle conflicts selectively, (5) skip empty commits proved more reliable than complex merge strategies. Cherry-picking allows selective commit preservation while maintaining clean history.
+
+**Methodological:**
+- Atomic commit benefits compound during reorganization: The clean-history branch's atomic commits (feat→test→docs sequence) made it easy to identify complete features and understand what work existed. This validated the earlier investment in commit organization - well-structured commits become invaluable during complex git operations like branch swaps and future PR extractions.
+
+### 2025-07-08 - Git Operation Selection and Conflict Management
+**Technical:**
+- Cherry-pick vs rebase operation selection: Cherry-pick repeatedly created conflicts when trying to fix branch base issues, while interactive rebase (`git rebase -i`) was the correct tool for reordering commits within the same branch. Cherry-pick is best for discrete commits between branches; rebase is best for reorganizing commits within a branch. Using the wrong git operation compounds problems rather than solving them.
+
+**Methodological:**
+- Conflict patterns indicate wrong approach: When the same operation (cherry-pick) repeatedly causes merge conflicts in the same files (openapi.yaml, patch.jsonnet), this signals the approach itself is flawed rather than the conflicts being coincidental. The files had incremental changes that made cherry-picking individual commits problematic - the entire sequence needed to be treated as a unit.
+
+**Technical:**
+- Branch base correction strategy: When a branch has the wrong base commit, the correct approach is `git rebase --onto <correct-base> <wrong-base> <branch>` rather than cherry-picking all commits to a new branch. This preserves the commit relationships and avoids conflicts from applying changes out of context.
