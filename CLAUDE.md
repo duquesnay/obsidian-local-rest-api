@@ -324,6 +324,16 @@ All directory operations have been implemented:
 **Methodological:**
 - Phase-based feature delivery: Breaking large feature sets into phases (Tag Management → Advanced Search → Content Negotiation) with individual branches, testing, and tagging created clear progress milestones. Each phase was fully implemented and tested before moving to the next, preventing feature creep and ensuring deliverable quality at each stage.
 
+### 2025-01-08 - File Move Feature Extraction and Security Implementation
+**Methodological:**
+- Git history analysis for feature extraction: When extracting features for PRs, analyze git history first (`git log --grep`, `git show`) to identify existing commits rather than recreating functionality. This revealed that file move was already implemented in commits that could be cherry-picked and refined, saving significant development time.
+
+**Methodological:**
+- Incremental security implementation: Rather than perfect security upfront, follow the pattern: (1) Core functionality, (2) Security gap analysis, (3) Targeted fixes, (4) Security-focused tests. This maintained development momentum while achieving comprehensive coverage, particularly effective for path traversal protection.
+
+**Technical:**
+- REST API error handling patterns: The Obsidian REST API uses a structured error handling pattern with `ErrorCode` enum, `ERROR_CODE_MESSAGES` mapping, and `returnCannedResponse()` method. Moving from ad-hoc `res.status().json()` responses to this established pattern improved consistency and maintainability across all error responses.
+
 ### Development Environment Insights
 
 **Hot Reload Limitations:**
