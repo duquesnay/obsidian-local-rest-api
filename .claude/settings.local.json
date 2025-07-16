@@ -12,7 +12,11 @@
       "Bash(grep:*)",
       "Bash(awk:*)",
       "Bash(sed:*)",
-      "Bash(./node_modules/.bin/jest:*)"
+      "Bash(./node_modules/.bin/jest:*)",
+      "mcp__obsidian__obsidian_check_path_exists",
+      "mcp__obsidian__obsidian_create_directory",
+      "mcp__obsidian__obsidian_append_content",
+      "mcp__obsidian__obsidian_rename_file"
     ],
     "deny": [],
     "allowedDirectories": [
