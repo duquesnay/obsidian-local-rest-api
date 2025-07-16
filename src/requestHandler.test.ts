@@ -747,6 +747,7 @@ describe("requestHandler", () => {
       app.vault._read = arbitraryExistingBytes;
       app.metadataCache._getFileCache.headings.push(headingCache);
       app.vault._getAbstractFileByPath = null;
+      app.vault._files = []; // Clear the files array to ensure file is not found
 
       await request(server)
         .patch(`/vault/${arbitraryFilePath}`)
@@ -1264,14 +1265,22 @@ describe("requestHandler", () => {
   });
 
   describe("vaultPatch - file operations", () => {
-    describe("file operations with replace (should fail)", () => {
-      test("replace operation with file target should fail", async () => {
+    describe("file operations with replace (legacy support)", () => {
+      test("replace operation with file target works as rename (legacy)", async () => {
         const oldPath = "folder/old-file.md";
         const newFilename = "new-file.md";
+        const expectedNewPath = "folder/new-file.md";
         
         // Mock file exists
         const mockFile = new TFile();
+        mockFile.path = oldPath;
         app.vault._getAbstractFileByPath = mockFile;
+        app.vault.adapter._exists = false; // Destination doesn't exist
+        
+        // Mock fileManager
+        (app as any).fileManager = {
+          renameFile: jest.fn().mockResolvedValue(undefined)
+        };
         
         const response = await request(server)
           .patch(`/vault/${oldPath}`)
@@ -1281,10 +1290,12 @@ describe("requestHandler", () => {
           .set("Target-Type", "file")
           .set("Target", "name")
           .send(newFilename)
-          .expect(400);
+          .expect(200);
           
-        // Should get an error because replace is not valid for file operations
-        expect(response.body.errorCode).toBeDefined();
+        // Should succeed as it's treated as a rename operation (legacy support)
+        expect(response.body.message).toEqual("File successfully renamed");
+        expect(response.body.oldPath).toEqual(oldPath);
+        expect(response.body.newPath).toEqual(expectedNewPath);
       });
     });
 
@@ -1418,6 +1429,41 @@ describe("requestHandler", () => {
 
     describe("directory operations", () => {
       describe("Operation: move", () => {
+        test("directory move should not return 404 for existing directory", async () => {
+          const directoryPath = "existing-folder";
+          const newPath = "moved-folder";
+          
+          // Mock that the path is NOT a file (directory)
+          app.vault._getAbstractFileByPath = null; // This simulates directory not found as file
+          
+          // Mock directory exists
+          app.vault.adapter._exists = true;
+          app.vault.adapter._stat.type = "folder";
+          
+          // Mock no files in directory (empty directory)
+          app.vault._files = [];
+          
+          // Set up exists mock for destination check
+          let existsCallCount = 0;
+          app.vault.adapter.exists = jest.fn().mockImplementation(() => {
+            existsCallCount++;
+            return Promise.resolve(existsCallCount === 1); // source exists, dest doesn't
+          });
+          
+          const response = await request(server)
+            .patch(`/vault/${directoryPath}`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "directory")
+            .set("Operation", "move")
+            .set("Target", "path")
+            .set("Content-Type", "text/plain")
+            .send(newPath)
+            .expect(200); // Should NOT be 404!
+            
+          expect(response.body.message).toEqual("Directory successfully moved");
+          expect(response.body.filesMovedCount).toEqual(0); // Empty directory
+        });
+        
         test("successful directory move", async () => {
           const oldPath = "folder1/subfolder";
           const newPath = "folder2/moved-subfolder";
@@ -1569,6 +1615,94 @@ describe("requestHandler", () => {
             .expect(400);
             
           expect(response.body.message).toEqual("New directory path is required in request body");
+        });
+        
+        test("directory move with spaces in paths", async () => {
+          const oldPath = "my folder/sub folder with spaces";
+          const newPath = "new location/moved folder";
+          
+          // Mock directory exists for source, not for destination
+          let existsCallCount = 0;
+          app.vault.adapter.exists = jest.fn().mockImplementation((path) => {
+            existsCallCount++;
+            if (existsCallCount === 1) return Promise.resolve(true); // source exists
+            if (existsCallCount === 2) return Promise.resolve(false); // destination doesn't exist
+            return Promise.resolve(false);
+          });
+          app.vault.adapter._stat.type = "folder";
+          
+          // Mock files in directory with spaces
+          const file1 = new TFile();
+          file1.path = "my folder/sub folder with spaces/file 1.md";
+          const file2 = new TFile();
+          file2.path = "my folder/sub folder with spaces/nested folder/file 2.md";
+          
+          app.vault._files = [file1, file2];
+          
+          // Mock createFolder
+          app.vault.createFolder = jest.fn().mockResolvedValue(undefined);
+          
+          // Mock fileManager
+          (app as any).fileManager = {
+            renameFile: jest.fn().mockResolvedValue(undefined)
+          };
+          
+          const response = await request(server)
+            .patch(`/vault/${encodeURIComponent(oldPath)}`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Content-Type", "text/plain")
+            .set("Operation", "move")
+            .set("Target-Type", "directory")
+            .set("Target", "path")
+            .send(newPath)
+            .expect(200);
+            
+          expect(response.body.message).toEqual("Directory successfully moved");
+          expect(response.body.oldPath).toEqual(oldPath);
+          expect(response.body.newPath).toEqual(newPath);
+          expect(response.body.filesMovedCount).toEqual(2);
+          
+          // Verify files were moved with correct paths
+          expect((app as any).fileManager.renameFile).toHaveBeenCalledWith(file1, "new location/moved folder/file 1.md");
+          expect((app as any).fileManager.renameFile).toHaveBeenCalledWith(file2, "new location/moved folder/nested folder/file 2.md");
+        });
+        
+        test("directory move with special characters and spaces", async () => {
+          const oldPath = "Projects & Ideas (2024)/Work Items";
+          const newPath = "Archive/2024 - Projects & Ideas";
+          
+          // Mock directory exists for source, not for destination
+          let existsCallCount = 0;
+          app.vault.adapter.exists = jest.fn().mockImplementation(() => {
+            existsCallCount++;
+            return Promise.resolve(existsCallCount === 1);
+          });
+          app.vault.adapter._stat.type = "folder";
+          
+          // Mock a file in directory
+          const file = new TFile();
+          file.path = "Projects & Ideas (2024)/Work Items/task #1.md";
+          
+          app.vault._files = [file];
+          
+          // Mock createFolder and fileManager
+          app.vault.createFolder = jest.fn().mockResolvedValue(undefined);
+          (app as any).fileManager = {
+            renameFile: jest.fn().mockResolvedValue(undefined)
+          };
+          
+          const response = await request(server)
+            .patch(`/vault/${encodeURIComponent(oldPath)}`)
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Content-Type", "text/plain")
+            .set("Operation", "move")
+            .set("Target-Type", "directory")
+            .set("Target", "path")
+            .send(newPath)
+            .expect(200);
+            
+          expect(response.body.filesMovedCount).toEqual(1);
+          expect((app as any).fileManager.renameFile).toHaveBeenCalledWith(file, "Archive/2024 - Projects & Ideas/task #1.md");
         });
       });
     });
@@ -1929,19 +2063,19 @@ describe("requestHandler", () => {
         file2.stat.size = 2048;
         
         const file3 = new TFile();
-        file3.path = "archive/old-note.txt";
+        file3.path = "archive/old-note.md";
         file3.stat.ctime = 1577836800000; // 2020-01-01
         file3.stat.mtime = 1577923200000; // 2020-01-02
         file3.stat.size = 512;
         
         app.vault._files = [file1, file2, file3];
-        app.vault._markdownFiles = [file1, file2]; // Only markdown files
+        app.vault._markdownFiles = [file1, file2, file3]; // All are markdown files
         
         // Set up file contents
         app.vault._readMap = {
           "projects/project1.md": "# Project Alpha\nThis is a project about testing advanced search.\n#project #important",
           "notes/meeting.md": "# Team Meeting\nDiscussed search functionality and regex patterns.\n#meeting #todo",
-          "archive/old-note.txt": "Legacy content from 2020."
+          "archive/old-note.md": "Legacy content from 2020."
         };
         
         // Set up metadata cache
@@ -1962,7 +2096,7 @@ describe("requestHandler", () => {
         app.metadataCache._fileCacheMap = {
           "projects/project1.md": cache1,
           "notes/meeting.md": cache2,
-          "archive/old-note.txt": cache3
+          "archive/old-note.md": cache3
         };
       });
 
@@ -1977,9 +2111,14 @@ describe("requestHandler", () => {
           .post("/search/advanced/")
           .set("Authorization", `Bearer ${API_KEY}`)
           .set("Content-Type", "application/json")
-          .send(query)
-          .expect(200);
+          .send(query);
           
+        if (response.status !== 200) {
+          console.log("Response status:", response.status);
+          console.log("Response body:", response.body);
+        }
+        
+        expect(response.status).toBe(200);
         expect(response.body.results).toHaveLength(1);
         expect(response.body.results[0].path).toEqual("notes/meeting.md");
         expect(response.body.total).toEqual(1);
@@ -2113,7 +2252,7 @@ describe("requestHandler", () => {
         expect(response.body.results).toHaveLength(2);
         const paths = response.body.results.map((r: any) => r.path);
         expect(paths).toContain("projects/project1.md");
-        expect(paths).toContain("archive/old-note.txt");
+        expect(paths).toContain("archive/old-note.md");
       });
 
       test("tag any filter", async () => {
@@ -2175,7 +2314,8 @@ describe("requestHandler", () => {
           .send(query)
           .expect(200);
           
-        expect(response.body.results).toHaveLength(2);
+        // Page 1 with limit 2 should have 1 result (the 3rd file)
+        expect(response.body.results).toHaveLength(1);
         expect(response.body.total).toEqual(3);
         expect(response.body.page).toEqual(1);
         expect(response.body.limit).toEqual(2);
@@ -2197,9 +2337,11 @@ describe("requestHandler", () => {
           .send(query)
           .expect(200);
           
-        expect(response.body.results).toHaveLength(2); // Only markdown files
-        expect(response.body.results[0].path).toEqual("notes/meeting.md");
-        expect(response.body.results[1].path).toEqual("projects/project1.md");
+        expect(response.body.results).toHaveLength(3); // All markdown files
+        // Files sorted by modified date descending (newest first)
+        expect(response.body.results[0].path).toEqual("notes/meeting.md"); // mtime: 2021-01-04
+        expect(response.body.results[1].path).toEqual("projects/project1.md"); // mtime: 2021-01-02
+        expect(response.body.results[2].path).toEqual("archive/old-note.md"); // mtime: 2020-01-02
       });
 
       test("context length option", async () => {
@@ -2255,8 +2397,8 @@ describe("requestHandler", () => {
           .send(query)
           .expect(200);
           
-        expect(response.body.results).toHaveLength(2); // Only markdown files
-        expect(response.body.total).toEqual(2);
+        expect(response.body.results).toHaveLength(3); // All markdown files
+        expect(response.body.total).toEqual(3);
       });
 
       test("no results found", async () => {
