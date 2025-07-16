@@ -61,14 +61,23 @@ export class Vault {
   _cachedRead = "";
   _files: TFile[] = [new TFile()];
   _markdownFiles: TFile[] = [];
+  _readMap: Record<string, string> = {};
 
   adapter = new DataAdapter();
 
   async read(file: TFile): Promise<string> {
+    // Check if we have a specific read value for this file path
+    if (this._readMap && this._readMap[file.path]) {
+      return this._readMap[file.path];
+    }
     return this._read;
   }
 
   async cachedRead(file: TFile): Promise<string> {
+    // Check if we have a specific read value for this file path
+    if (this._readMap && this._readMap[file.path]) {
+      return this._readMap[file.path];
+    }
     return this._cachedRead;
   }
 
@@ -130,8 +139,13 @@ export class CachedMetadata {
 
 export class MetadataCache {
   _getFileCache = new CachedMetadata();
+  _fileCacheMap: Record<string, CachedMetadata> = {};
 
   getFileCache(file: TFile): CachedMetadata {
+    // Check if we have a specific cache for this file path
+    if (this._fileCacheMap && this._fileCacheMap[file.path]) {
+      return this._fileCacheMap[file.path];
+    }
     return this._getFileCache;
   }
 }
@@ -197,5 +211,15 @@ export class SearchResult {
 export function prepareSimpleSearch(
   query: string
 ): (value: string) => null | SearchResult {
-  return null;
+  // Return a simple search function that checks if the query is in the value
+  return (value: string) => {
+    const index = value.indexOf(query);
+    if (index >= 0) {
+      return {
+        score: 1,
+        matches: [[index, index + query.length]]
+      };
+    }
+    return null;
+  };
 }
