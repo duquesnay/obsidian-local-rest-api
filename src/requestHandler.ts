@@ -621,6 +621,27 @@ export default class RequestHandler {
     const target =
       targetType == "heading" ? rawTarget.split(targetDelimiter) : rawTarget;
 
+    // Check for directory-level operations FIRST (before file validation)
+    // Only if targetType is explicitly set to "directory"
+    if (targetType === "directory") {
+      if (operation === "move") {
+        if (rawTarget !== "path") {
+          res.status(400).json({
+            errorCode: 40005,
+            message: "move operation must use Target: path"  
+          });
+          return;
+        }
+        return this.handleDirectoryMoveOperation(path, req, res);
+      }
+      // For directory operations that aren't implemented, return appropriate error
+      res.status(400).json({
+        errorCode: 40010,
+        message: `Operation '${operation}' is not supported for Target-Type: directory`
+      });
+      return;
+    }
+
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) {
       this.returnCannedResponse(res, {
@@ -665,20 +686,6 @@ export default class RequestHandler {
       // Legacy support for "replace" operation with file target type
       if (operation === "replace" && rawTarget === "name") {
         return this.handleRenameOperation(path, req, res);
-      }
-    }
-    
-    // Check for directory-level operations BEFORE general validation
-    if (targetType === "directory") {
-      if (operation === "move") {
-        if (rawTarget !== "path") {
-          res.status(400).json({
-            errorCode: 40005,
-            message: "move operation must use Target: path"  
-          });
-          return;
-        }
-        return this.handleDirectoryMoveOperation(path, req, res);
       }
     }
     
@@ -1737,140 +1744,6 @@ export default class RequestHandler {
     }
   }
 
-  async handleDirectoryMoveOperation(
-    path: string,
-    req: express.Request,
-    res: express.Response
-  ): Promise<void> {
-    
-    // Validate directory path (should end with "/" or be a valid directory)
-    if (!path) {
-      res.status(400).json({
-        errorCode: 40001,
-        message: "Directory path is required"
-      });
-      return;
-    }
-
-    // Get the new directory path from request body
-    const newPath = typeof req.body === 'string' ? req.body.trim() : '';
-    
-    if (!newPath) {
-      res.status(400).json({
-        errorCode: 40001,
-        message: "New directory path is required in request body"
-      });
-      return;
-    }
-
-    // Check if source directory exists
-    const sourceExists = await this.app.vault.adapter.exists(path);
-    if (!sourceExists) {
-      this.returnCannedResponse(res, { statusCode: 404 });
-      return;
-    }
-
-    // Check if source is actually a directory
-    try {
-      const sourceStat = await this.app.vault.adapter.stat(path);
-      if (sourceStat && sourceStat.type !== "folder") {
-        res.status(400).json({
-          errorCode: 40002,
-          message: "Source path is not a directory"
-        });
-        return;
-      }
-    } catch (error) {
-      res.status(400).json({
-        errorCode: 40002,
-        message: "Source path is not a directory"
-      });
-      return;
-    }
-
-    // Check if destination already exists
-    const destExists = await this.app.vault.adapter.exists(newPath);
-    if (destExists) {
-      res.status(409).json({
-        errorCode: 40901,
-        message: "Destination directory already exists"
-      });
-      return;
-    }
-
-    // Create parent directories if needed for destination
-    const parentDir = newPath.substring(0, newPath.lastIndexOf('/'));
-    if (parentDir) {
-      try {
-        await this.app.vault.createFolder(parentDir);
-      } catch {
-        // Folder might already exist, continue
-      }
-    }
-
-    try {
-      // Get all files in the source directory recursively
-      const allFiles = this.app.vault.getFiles();
-      const filesToMove = allFiles.filter(file => file.path.startsWith(path + "/"));
-      
-      // Track moved files for potential rollback
-      const movedFiles: Array<{oldPath: string, newPath: string}> = [];
-      
-      try {
-        // Move each file individually to preserve links
-        for (const file of filesToMove) {
-          const relativePath = file.path.substring(path.length + 1);
-          const newFilePath = `${newPath}/${relativePath}`;
-          
-          // Create intermediate directories if needed
-          const fileParentDir = newFilePath.substring(0, newFilePath.lastIndexOf('/'));
-          if (fileParentDir && fileParentDir !== newPath) {
-            try {
-              await this.app.vault.createFolder(fileParentDir);
-            } catch {
-              // Directory might already exist
-            }
-          }
-          
-          // Use FileManager to move the file (preserves history and updates links)
-          // @ts-ignore - fileManager exists at runtime but not in type definitions
-          await this.app.fileManager.renameFile(file, newFilePath);
-          
-          movedFiles.push({oldPath: file.path, newPath: newFilePath});
-        }
-        
-        res.status(200).json({
-          message: "Directory successfully moved",
-          oldPath: path,
-          newPath: newPath,
-          filesMovedCount: filesToMove.length
-        });
-        
-      } catch (moveError) {
-        // Attempt rollback - this is best effort
-        for (const moved of movedFiles.reverse()) {
-          try {
-            const movedFile = this.app.vault.getAbstractFileByPath(moved.newPath);
-            if (movedFile instanceof TFile) {
-              // @ts-ignore
-              await this.app.fileManager.renameFile(movedFile, moved.oldPath);
-            }
-          } catch (rollbackError) {
-            // Log rollback error but don't fail the main error response
-            console.error(`Failed to rollback file ${moved.newPath} to ${moved.oldPath}:`, rollbackError);
-          }
-        }
-        
-        throw moveError;
-      }
-      
-    } catch (error) {
-      res.status(500).json({
-        errorCode: 50001,
-        message: `Failed to move directory: ${error.message}`
-      });
-    }
-  }
 
   async removeEmptyDirectoriesRecursively(dirPath: string): Promise<void> {
     try {
