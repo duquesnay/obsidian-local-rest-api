@@ -14,4 +14,8 @@ module.exports = {
     "\\.ts$": ["ts-jest"],
     "\\.ya?ml$": "jest-raw-loader",
   },
+  testPathIgnorePatterns: [
+    "/node_modules/",
+    "/worktrees/"
+  ],
 };
