@@ -284,6 +284,19 @@ All directory operations have been implemented:
 - [ ] Directory templates and scaffolding
 - [ ] Import/export directory structures
 
+## API Design Patterns
+
+### Request Routing Architecture
+- **Route by operation type FIRST**: When handling polymorphic endpoints (same URL, different operations), always route by the operation type/target type before doing any validation
+- **Avoid sequential validation**: Don't validate assumptions (like "is this a file?") before knowing what operation is requested
+- **Pattern**: Parse → Route → Validate (not Parse → Validate → Route)
+
+### Testing Strategy for Polymorphic Endpoints
+When an endpoint handles multiple entity types (files/directories/tags):
+- Create a test matrix covering ALL combinations of operation × entity type
+- Test the "wrong entity type" cases explicitly (e.g., moving a file with Target-Type: directory)
+- Add tests for new operations to ALL entity types, even if just to verify proper error handling
+
 ## Project Learnings
 
 ### 2025-01-02 - File Operations Security Implementation
@@ -360,3 +373,13 @@ All directory operations have been implemented:
 
 **Technical:**
 - Branch base correction strategy: When a branch has the wrong base commit, the correct approach is `git rebase --onto <correct-base> <wrong-base> <branch>` rather than cherry-picking all commits to a new branch. This preserves the commit relationships and avoids conflicts from applying changes out of context.
+
+### 2025-01-16 - Polymorphic Endpoint Architecture
+**Methodological:**
+- Sequential validation trap: Bug where directory operations returned 404 because code checked for file existence before checking operation type. Revealed that validation order matters critically in polymorphic endpoints. Solution was reordering, but better solution would be route-first architecture.
+
+**Technical:**
+- When same endpoint handles multiple entity types (file/directory/tag), must route by Target-Type before any entity validation. Pattern: Parse request → Determine handler by type → Handler validates its specific requirements. Never validate assumptions about entity type before routing.
+
+**Testing:**
+- Polymorphic endpoints need matrix testing: every operation × entity type combination, including "wrong type" cases. Missing test: "directory move returns 404" would have caught this immediately.
