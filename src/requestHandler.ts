@@ -1132,6 +1132,9 @@ export default class RequestHandler {
       const movedFiles: Array<{oldPath: string, newPath: string}> = [];
       
       try {
+        // Create the destination directory first
+        await this.app.vault.createFolder(newPath);
+        
         // Move each file individually to preserve links
         for (const file of filesToMove) {
           const relativePath = file.path.substring(path.length + 1);
