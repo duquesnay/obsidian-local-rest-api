@@ -7,7 +7,12 @@
       "Bash(rg:*)",
       "Bash(cp:*)",
       "Bash(rm:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(chmod:*)",
+      "Bash(grep:*)",
+      "Bash(awk:*)",
+      "Bash(sed:*)",
+      "Bash(./node_modules/.bin/jest:*)"
     ],
     "deny": [],
     "allowedDirectories": [
