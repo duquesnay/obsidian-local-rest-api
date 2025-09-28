@@ -256,7 +256,7 @@ std.manifestYamlDoc(
             {
               name: 'pathToDirectory',
               'in': 'path',
-              description: 'Path to list files from (relative to your vault root).  Note that empty directories will not be returned.\n\nNote: this particular interactive tool requires that you provide an argument for this field, but the API itself will allow you to list the root folder of your vault. If you would like to try listing content in the root of your vault using this interactive tool, use the above "List files that exist in the root of your vault" form above.\n',
+              description: 'Path to list files from (relative to your vault root). Returns both files and directories (directories are shown with trailing slash).\n\nNote: this particular interactive tool requires that you provide an argument for this field, but the API itself will allow you to list the root folder of your vault. If you would like to try listing content in the root of your vault using this interactive tool, use the above "List files that exist in the root of your vault" form above.\n',
               required: true,
               schema: {
                 type: 'string',

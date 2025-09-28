@@ -269,6 +269,16 @@ All directory operations have been implemented:
   - Accept headers for different representations
   - Query parameter `?format=` support
   - Multiple formats: metadata-only, frontmatter-only, plain text, HTML
+- [x] Empty Directory Listing Bug - COMPLETED
+  - Fixed GET `/vault/{path}/` to include empty directories using adapter.list()
+  - Updated OpenAPI documentation to reflect directories are now returned
+  - Empty directories now show with trailing slash in listing response
+- [ ] Bookmark Management - HIGH PRIORITY
+  - GET `/bookmarks/` - List all bookmarks with groups/folders
+  - POST `/bookmarks/` - Create new bookmark or bookmark folder
+  - PATCH `/bookmarks/{id}/` - Update bookmark title, URL, or folder
+  - DELETE `/bookmarks/{id}/` - Remove bookmark or folder
+  - Integration with Obsidian's bookmark system
 - [ ] Link Graph Operations - MEDIUM PRIORITY
   - Backlinks and forward links
   - Broken link detection
