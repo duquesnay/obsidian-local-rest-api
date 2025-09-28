@@ -59,7 +59,7 @@ info:
     
     When using this tool you may see browser security warnings due to your browser not trusting the self-signed certificate the plugin will generate on its first run.  If you do, you can make those errors disappear by adding the certificate as a "Trusted Certificate" in your browser or operating system's settings.
   title: "Local REST API for Obsidian"
-  version: "1.0"
+  version: "4.0.0"
 openapi: "3.0.2"
 paths:
   /:
@@ -346,28 +346,6 @@ paths:
         
         File rename and move operations preserve internal links within your vault.
         Directory move operations move all files within the directory while preserving links.
-        
-        ## Tag Management
-        
-        ### Adding a Tag to a File
-        
-        To add a tag to a file, use:
-        - `Operation`: `add`
-        - `Target-Type`: `tag`
-        - `Target`: `tagname` (without # prefix)
-        - Request body: empty
-        
-        The tag will be added to the frontmatter if it exists, otherwise as an inline tag at the end of the file.
-        
-        ### Removing a Tag from a File
-        
-        To remove a tag from a file, use:
-        - `Operation`: `remove`
-        - `Target-Type`: `tag`
-        - `Target`: `tagname` (without # prefix)
-        - Request body: empty
-        
-        This removes the tag from both inline occurrences and frontmatter.
       parameters:
         - description: "Patch operation to perform"
           in: "header"
@@ -1100,28 +1078,6 @@ paths:
         
         File rename and move operations preserve internal links within your vault.
         Directory move operations move all files within the directory while preserving links.
-        
-        ## Tag Management
-        
-        ### Adding a Tag to a File
-        
-        To add a tag to a file, use:
-        - `Operation`: `add`
-        - `Target-Type`: `tag`
-        - `Target`: `tagname` (without # prefix)
-        - Request body: empty
-        
-        The tag will be added to the frontmatter if it exists, otherwise as an inline tag at the end of the file.
-        
-        ### Removing a Tag from a File
-        
-        To remove a tag from a file, use:
-        - `Operation`: `remove`
-        - `Target-Type`: `tag`
-        - `Target`: `tagname` (without # prefix)
-        - Request body: empty
-        
-        This removes the tag from both inline occurrences and frontmatter.
       parameters:
         - description: "Patch operation to perform"
           in: "header"
@@ -1660,28 +1616,6 @@ paths:
         
         File rename and move operations preserve internal links within your vault.
         Directory move operations move all files within the directory while preserving links.
-        
-        ## Tag Management
-        
-        ### Adding a Tag to a File
-        
-        To add a tag to a file, use:
-        - `Operation`: `add`
-        - `Target-Type`: `tag`
-        - `Target`: `tagname` (without # prefix)
-        - Request body: empty
-        
-        The tag will be added to the frontmatter if it exists, otherwise as an inline tag at the end of the file.
-        
-        ### Removing a Tag from a File
-        
-        To remove a tag from a file, use:
-        - `Operation`: `remove`
-        - `Target-Type`: `tag`
-        - `Target`: `tagname` (without # prefix)
-        - Request body: empty
-        
-        This removes the tag from both inline occurrences and frontmatter.
       parameters:
         - description: "Patch operation to perform"
           in: "header"
@@ -2835,28 +2769,6 @@ paths:
         
         File rename and move operations preserve internal links within your vault.
         Directory move operations move all files within the directory while preserving links.
-        
-        ## Tag Management
-        
-        ### Adding a Tag to a File
-        
-        To add a tag to a file, use:
-        - `Operation`: `add`
-        - `Target-Type`: `tag`
-        - `Target`: `tagname` (without # prefix)
-        - Request body: empty
-        
-        The tag will be added to the frontmatter if it exists, otherwise as an inline tag at the end of the file.
-        
-        ### Removing a Tag from a File
-        
-        To remove a tag from a file, use:
-        - `Operation`: `remove`
-        - `Target-Type`: `tag`
-        - `Target`: `tagname` (without # prefix)
-        - Request body: empty
-        
-        This removes the tag from both inline occurrences and frontmatter.
       parameters:
         - description: "Patch operation to perform"
           in: "header"
@@ -3080,7 +2992,7 @@ paths:
     get:
       parameters:
         - description: |
-            Path to list files from (relative to your vault root).  Note that empty directories will not be returned.
+            Path to list files from (relative to your vault root). Returns both files and directories (directories are shown with trailing slash).
             
             Note: this particular interactive tool requires that you provide an argument for this field, but the API itself will allow you to list the root folder of your vault. If you would like to try listing content in the root of your vault using this interactive tool, use the above "List files that exist in the root of your vault" form above.
           in: "path"

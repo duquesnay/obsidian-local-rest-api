@@ -1,5 +1,16 @@
 # New Features Changelog
 
+## Version 4.0.0 (2025-09-28) ✅
+
+### Bug Fixes
+- **Fixed empty directory listing** - GET `/vault/{path}/` now properly includes empty directories using adapter.list() method
+- **Updated OpenAPI documentation** - Corrected directory listing description to reflect that empty directories are now returned
+- **Empty directories display** - Empty directories now show with trailing slash in listing response
+
+### Documentation Updates
+- Updated OpenAPI version to 4.0.0
+- Updated backlog management in CLAUDE.md with completed items and future priorities
+
 ## Recent Enhancements (claude-dev branch)
 
 ### Phase 1: Tag Management ✅
