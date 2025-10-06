@@ -25,6 +25,7 @@ class DataAdapter {
   _writeBinary : [string, ArrayBuffer];
   _remove: [string];
   _stat = new Stat();
+  _listResult: { files: string[]; folders: string[] } = { files: [], folders: [] };
 
   async exists(path: string): Promise<boolean> {
     return this._exists;
@@ -52,6 +53,10 @@ class DataAdapter {
 
   async remove(path: string): Promise<void> {
     this._remove = [path];
+  }
+
+  async list(path: string): Promise<{ files: string[]; folders: string[] }> {
+    return this._listResult;
   }
 }
 

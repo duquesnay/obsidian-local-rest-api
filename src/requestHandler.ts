@@ -286,60 +286,31 @@ export default class RequestHandler {
         return;
       }
 
-      try {
-        // Use the adapter's list method to get both files and folders
-        const contents = await (this.app.vault.adapter as any).list(path);
-        const items: string[] = [];
+      // Use the adapter's list method to get both files and folders
+      const contents = await (this.app.vault.adapter as any).list(path);
+      const items: string[] = [];
 
-        // Add files from the directory
-        if (contents.files) {
-          for (const file of contents.files) {
-            const relativePath = file.startsWith(path) ? file.slice(path.length) : file;
-            items.push(relativePath);
-          }
+      // Add files from the directory
+      if (contents.files) {
+        for (const file of contents.files) {
+          const relativePath = file.startsWith(path) ? file.slice(path.length) : file;
+          items.push(relativePath);
         }
-
-        // Add folders from the directory (with trailing slash)
-        if (contents.folders) {
-          for (const folder of contents.folders) {
-            const relativePath = folder.startsWith(path) ? folder.slice(path.length) : folder;
-            items.push(relativePath + "/");
-          }
-        }
-
-        items.sort();
-
-        res.json({
-          files: items,
-        });
-      } catch (error) {
-        // Fallback to the old method if adapter.list fails
-        const files = [
-          ...new Set(
-            this.app.vault
-              .getFiles()
-              .map((e) => e.path)
-              .filter((filename) => filename.startsWith(path))
-              .map((filename) => {
-                const subPath = filename.slice(path.length);
-                if (subPath.indexOf("/") > -1) {
-                  return subPath.slice(0, subPath.indexOf("/") + 1);
-                }
-                return subPath;
-              })
-          ),
-        ];
-        files.sort();
-
-        if (files.length === 0) {
-          this.returnCannedResponse(res, { statusCode: 404 });
-          return;
-        }
-
-        res.json({
-          files: files,
-        });
       }
+
+      // Add folders from the directory (with trailing slash)
+      if (contents.folders) {
+        for (const folder of contents.folders) {
+          const relativePath = folder.startsWith(path) ? folder.slice(path.length) : folder;
+          items.push(relativePath + "/");
+        }
+      }
+
+      items.sort();
+
+      res.json({
+        files: items,
+      });
     } else {
       const exists = await this.app.vault.adapter.exists(path);
 

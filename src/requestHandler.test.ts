@@ -113,25 +113,24 @@ describe("requestHandler", () => {
   });
 
   describe("vaultGet", () => {
-    test("directory empty", async () => {
+    test("directory empty should return 200 with empty list", async () => {
       app.vault._files = [];
+      app.vault.adapter._listResult = { files: [], folders: [] };
 
-      await request(server)
+      const result = await request(server)
         .get("/vault/")
         .set("Authorization", `Bearer ${API_KEY}`)
-        .expect(404);
+        .expect(200);
+
+      expect(result.body.files).toEqual([]);
     });
 
-    test("directory with files", async () => {
-      const arbitraryDirectory = "somewhere";
-
-      const rootFile = new TFile();
-      rootFile.path = "rootFile.md";
-
-      const notRootFile = new TFile();
-      notRootFile.path = `${arbitraryDirectory}/anotherFile.md`;
-
-      app.vault._files = [rootFile, notRootFile];
+    test("directory with only empty subdirectories", async () => {
+      app.vault._files = [];
+      app.vault.adapter._listResult = {
+        files: [],
+        folders: ["empty-folder", "another-empty"]
+      };
 
       const result = await request(server)
         .get("/vault/")
@@ -139,8 +138,30 @@ describe("requestHandler", () => {
         .expect(200);
 
       expect(result.body.files).toEqual([
-        rootFile.path,
-        `${arbitraryDirectory}/`,
+        "another-empty/",
+        "empty-folder/"
+      ]);
+    });
+
+    test("directory with files and folders", async () => {
+      const rootFile = new TFile();
+      rootFile.path = "rootFile.md";
+
+      app.vault._files = [rootFile];
+      app.vault.adapter._listResult = {
+        files: ["rootFile.md"],
+        folders: ["empty-folder", "another-folder"]
+      };
+
+      const result = await request(server)
+        .get("/vault/")
+        .set("Authorization", `Bearer ${API_KEY}`)
+        .expect(200);
+
+      expect(result.body.files).toEqual([
+        "another-folder/",
+        "empty-folder/",
+        "rootFile.md"
       ]);
     });
 
