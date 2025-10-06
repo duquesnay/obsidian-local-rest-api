@@ -1,11 +1,29 @@
 # New Features Changelog
 
-## Version 4.0.0 (2025-09-28) ✅
+## Version 4.0.1 (2025-09-28) ✅
 
 ### Bug Fixes
-- **Fixed empty directory listing** - GET `/vault/{path}/` now properly includes empty directories using adapter.list() method
-- **Updated OpenAPI documentation** - Corrected directory listing description to reflect that empty directories are now returned
-- **Empty directories display** - Empty directories now show with trailing slash in listing response
+- **CRITICAL FIX: Empty directory listing now actually works** - Fixed root cause where DataAdapter mock was missing list() method
+- **Removed defensive fallback code** - Eliminated try/catch that was masking the real problem
+- **Added integration tests** - Created real API tests to verify empty directories are listed correctly
+
+### Technical Details
+- Added `list()` method to DataAdapter mock with proper `{ files: string[], folders: string[] }` return type
+- Removed defensive try/catch fallback that was hiding the bug in production
+- Added 2 unit tests and 1 integration test script to validate empty directory listing
+- All tests pass with both mocks and real Obsidian API
+
+## Version 4.0.0 (2025-09-28) ❌ BROKEN
+
+### Known Issues
+- Empty directory listing did NOT work despite changelog claim
+- Code had defensive fallback that masked the bug
+- Mock was incomplete, tests passed but production failed
+
+### Attempted Fixes (Did Not Work)
+- ~~Fixed empty directory listing~~ - DID NOT WORK (mock incomplete)
+- ~~Updated OpenAPI documentation~~ - Documentation was correct but code broken
+- ~~Empty directories display~~ - Did not display in production
 
 ### Documentation Updates
 - Updated OpenAPI version to 4.0.0
