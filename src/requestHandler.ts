@@ -242,6 +242,63 @@ export default class RequestHandler {
     res.status(this.getStatusCode({ statusCode, errorCode })).json(response);
   }
 
+  private getBookmarksPlugin(): any | null {
+    try {
+      const bookmarksPlugin = this.app.internalPlugins?.plugins?.bookmarks;
+      if (!bookmarksPlugin?.enabled) return null;
+
+      const instance = bookmarksPlugin.instance;
+
+      // Validate expected methods exist
+      if (typeof instance?.getItemTitle !== 'function') {
+        console.warn("Bookmarks plugin missing getItemTitle method");
+        return null;
+      }
+
+      return instance;
+    } catch (error) {
+      console.error("Error accessing bookmarks plugin:", error);
+      return null;
+    }
+  }
+
+  private enhanceBookmark(item: any): any {
+    const instance = this.getBookmarksPlugin();
+    if (!instance) {
+      // Fallback: minimal response
+      return {
+        path: item.path,
+        type: item.type,
+        title: item.path,
+        ctime: item.ctime
+      };
+    }
+
+    try {
+      const enhanced: any = {
+        path: item.path,
+        type: item.type,
+        title: instance.getItemTitle(item),
+        ctime: item.ctime
+      };
+
+      // Defensive check for groups
+      if (item.type === 'group' && Array.isArray(item.items)) {
+        enhanced.items = item.items.map((child: any) => this.enhanceBookmark(child));
+      }
+
+      return enhanced;
+    } catch (error) {
+      console.error("Error enhancing bookmark:", error);
+      return {
+        path: item.path,
+        type: item.type,
+        title: item.path,
+        ctime: item.ctime
+      };
+    }
+  }
+
   root(req: express.Request, res: express.Response): void {
     let certificate: forge.pki.Certificate | undefined;
     try {
@@ -1754,6 +1811,51 @@ export default class RequestHandler {
     }
   }
 
+  async bookmarksGet(req: express.Request, res: express.Response): Promise<void> {
+    const instance = this.getBookmarksPlugin();
+
+    if (!instance) {
+      return this.returnCannedResponse(res, {
+        statusCode: 503,
+        message: "Bookmarks plugin is not enabled"
+      });
+    }
+
+    const bookmarks = Array.from(Object.values(instance.bookmarkLookup));
+
+    // Optional type filter
+    const typeFilter = req.query.type as string;
+    const filtered = typeFilter
+      ? bookmarks.filter((b: any) => b.type === typeFilter)
+      : bookmarks;
+
+    const enhanced = filtered.map((item: any) => this.enhanceBookmark(item));
+
+    res.json({ bookmarks: enhanced });
+  }
+
+  async bookmarkGet(req: express.Request, res: express.Response): Promise<void> {
+    const instance = this.getBookmarksPlugin();
+
+    if (!instance) {
+      return this.returnCannedResponse(res, {
+        statusCode: 503,
+        message: "Bookmarks plugin is not enabled"
+      });
+    }
+
+    const decodedPath = decodeURIComponent(req.params.path);
+    const item = instance.bookmarkLookup[decodedPath];
+
+    if (!item) {
+      return this.returnCannedResponse(res, {
+        statusCode: 404,
+        message: `No bookmark exists with path: ${decodedPath}`
+      });
+    }
+
+    res.json(this.enhanceBookmark(item));
+  }
 
   async removeEmptyDirectoriesRecursively(dirPath: string): Promise<void> {
     try {
@@ -2948,6 +3050,10 @@ export default class RequestHandler {
       .patch(this.activeFilePatch.bind(this))
       .post(this.activeFilePost.bind(this))
       .delete(this.activeFileDelete.bind(this));
+
+    // CRITICAL: Bookmarks routes MUST be registered before /vault/* wildcard
+    this.api.route("/bookmarks/").get(this.bookmarksGet.bind(this));
+    this.api.route("/bookmarks/:path").get(this.bookmarkGet.bind(this));
 
     this.api
       .route("/vault/*")
