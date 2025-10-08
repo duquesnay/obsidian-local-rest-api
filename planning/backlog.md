@@ -1,13 +1,38 @@
-# Bookmarks API Feature Backlog
+# Product Backlog
+
+**Unified priority list**: Bugs and features ordered by real value and urgency
+**Current focus**: Bookmarks API + Critical bug fixes
+
+---
+
+## Priority-Ordered Work List
+
+### CRITICAL BUGS (Must fix before new features)
+
+- [x] BUG-PATH1: Third-party plugins access files without trailing slash errors
+  - **Issue**: GET /vault/file.md/ returns 404 (trailing slash interpreted as directory)
+  - **Impact**: favorite-note plugin crashes with "Cannot read properties of null (reading 'classList')"
+  - **Root cause**: Path normalization missing for file requests with trailing slashes
+  - **Solution**: Strip trailing slashes before processing file paths
+  - **Acceptance**:
+    - /vault/file.md/ and /vault/file.md return same result
+    - Integration test verifies path normalization
+    - Third-party plugins work with trailing slashes
+  - **Estimate**: 30min (path normalization + tests)
+  - **Priority**: HIGH (breaks plugin ecosystem integration)
+  - **Completed**: 2025-10-08
+  - **Commit**: 116da98
+  - **Test Coverage**: 186 tests passing
+  - **Breaking Changes**: ZERO
+
+---
+
+## Bookmarks API Feature Backlog
 
 **Feature**: REST API for Obsidian bookmark management
 **Branch**: feat/bookmarks-api
 **Priority**: HIGH
 **Status**: Design complete, implementation pending
-
----
-
-## Priority-Ordered Work List
 
 ### Critical Foundation (BLOCKING - Must complete first)
 - [ ] BKM-TECH1: System routes bookmark requests without /vault/* conflicts

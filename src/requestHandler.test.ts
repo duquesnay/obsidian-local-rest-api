@@ -199,6 +199,32 @@ describe("requestHandler", () => {
       expect(result.text).toEqual(arbitraryFileContent);
     });
 
+    test("file content with trailing slash (BUG-PATH1)", async () => {
+      const arbitraryFilename = "somefile.md";
+      const arbitraryFileContent = "Beep boop";
+      const fileContentBuffer = new ArrayBuffer(arbitraryFileContent.length);
+      const fileContentBufferView = new Uint8Array(fileContentBuffer);
+      for (let i = 0; i < arbitraryFileContent.length; i++) {
+        fileContentBufferView[i] = arbitraryFileContent.charCodeAt(i);
+      }
+
+      app.vault.adapter._readBinary = fileContentBuffer;
+
+      // Request file with trailing slash - should be treated same as without
+      const result = await request(server)
+        .get(`/vault/${arbitraryFilename}/`)
+        .set("Authorization", `Bearer ${API_KEY}`)
+        .expect(200);
+
+      expect(result.header["content-disposition"]).toEqual(
+        `attachment; filename="${arbitraryFilename}"`
+      );
+      expect(result.header["content-type"]).toEqual(
+        "text/markdown; charset=utf-8"
+      );
+      expect(result.text).toEqual(arbitraryFileContent);
+    });
+
     test("file does not exist", async () => {
       const arbitraryFilename = "somefile.md";
 
