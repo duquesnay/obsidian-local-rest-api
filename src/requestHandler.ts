@@ -1575,11 +1575,16 @@ export default class RequestHandler {
   private async addSingleTag(file: TFile, tagName: string, location: string): Promise<void> {
     let content = await this.app.vault.read(file);
     const originalContent = content;
-
-    // Add tag to frontmatter if it exists, otherwise add as inline tag
-    const frontmatterRegex = /^---\n([\s\S]*?)\n---/;
-    const frontmatterMatch = content.match(frontmatterRegex);
     const cache = this.app.metadataCache.getFileCache(file);
+
+    content = this.addTagToContent(content, tagName, location, cache);
+
+    // Write the file if it was modified
+    if (content !== originalContent) {
+      await this.app.vault.adapter.write(file.path, content);
+    }
+  }
+
   /**
    * Add tag to content string (in-memory operation, no file I/O)
    */
@@ -1615,10 +1620,7 @@ export default class RequestHandler {
       content += `\n#${tagName}`;
     }
 
-    // Write the file if it was modified
-    if (content !== originalContent) {
-      await this.app.vault.adapter.write(file.path, content);
-    }
+    return content;
   }
 
   private async removeSingleTag(file: TFile, tagName: string, location: string): Promise<void> {
@@ -1626,7 +1628,12 @@ export default class RequestHandler {
     const originalContent = content;
     const cache = this.app.metadataCache.getFileCache(file);
 
-    return content;
+    content = this.removeTagFromContent(content, tagName, location, cache);
+
+    // Write the file if it was modified
+    if (content !== originalContent) {
+      await this.app.vault.adapter.write(file.path, content);
+    }
   }
 
   /**
@@ -1679,32 +1686,6 @@ export default class RequestHandler {
     content = content.replace(/\n\s*\n\s*\n/g, '\n\n');
 
     return content;
-  }
-
-  private async addSingleTag(file: TFile, tagName: string, location: string): Promise<void> {
-    let content = await this.app.vault.read(file);
-    const originalContent = content;
-    const cache = this.app.metadataCache.getFileCache(file);
-
-    content = this.addTagToContent(content, tagName, location, cache);
-
-    // Write the file if it was modified
-    if (content !== originalContent) {
-      await this.app.vault.adapter.write(file.path, content);
-    }
-  }
-
-  private async removeSingleTag(file: TFile, tagName: string, location: string): Promise<void> {
-    let content = await this.app.vault.read(file);
-    const originalContent = content;
-    const cache = this.app.metadataCache.getFileCache(file);
-
-    content = this.removeTagFromContent(content, tagName, location, cache);
-
-    // Write the file if it was modified
-    if (content !== originalContent) {
-      await this.app.vault.adapter.write(file.path, content);
-    }
   }
 
   private async processTagOperations(
