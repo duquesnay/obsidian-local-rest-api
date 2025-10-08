@@ -1491,181 +1491,369 @@ export default class RequestHandler {
     });
   }
 
+  private parseTagOperationRequest(req: express.Request): {
+    tags: string[];
+    operation: 'add' | 'remove';
+    location: 'frontmatter' | 'inline' | 'both';
+    isBatchOperation: boolean;
+  } | null {
+    const operation = req.get("Operation")?.toLowerCase();
+    if (operation !== 'add' && operation !== 'remove') {
+      return null;
+    }
+
+    const location = (req.get("Location")?.toLowerCase() || 'frontmatter') as any;
+
+    let tags: string[] = [];
+    let isBatchOperation = false;
+
+    // Check body first for multi-tag
+    if (req.body?.tags && Array.isArray(req.body.tags)) {
+      tags = req.body.tags
+        .filter((t: any) => typeof t === 'string' && t.trim().length > 0)
+        .map((t: string) => t.trim());
+      // Deduplicate
+      tags = Array.from(new Set(tags));
+      isBatchOperation = true;
+    } else {
+      // Fallback to header for backward compatibility
+      const targetHeader = req.get("Target");
+      if (targetHeader) {
+        tags = [targetHeader.trim()];
+        isBatchOperation = false;
+      }
+    }
+
+    if (tags.length === 0) {
+      return null;
+    }
+
+    return { tags, operation: operation as 'add' | 'remove', location, isBatchOperation };
+  }
+
+  private validateTagName(tag: string): {
+    tag: string;
+    isValid: boolean;
+    error?: string;
+  } {
+    if (!tag || !tag.trim()) {
+      return { tag, isValid: false, error: "Tag name cannot be empty" };
+    }
+
+    const trimmed = tag.trim();
+
+    if (!/^[a-zA-Z0-9_\-\/]+$/.test(trimmed)) {
+      return {
+        tag,
+        isValid: false,
+        error: "Invalid tag name format (alphanumeric, dash, underscore, slash only)"
+      };
+    }
+
+    if (trimmed.length > 100) {
+      return { tag, isValid: false, error: "Tag name too long (max 100 characters)" };
+    }
+
+    return { tag: trimmed, isValid: true };
+  }
+
+  private async addSingleTag(file: TFile, tagName: string, location: string): Promise<void> {
+    let content = await this.app.vault.read(file);
+    const originalContent = content;
+
+    // Add tag to frontmatter if it exists, otherwise add as inline tag
+    const frontmatterRegex = /^---\n([\s\S]*?)\n---/;
+    const frontmatterMatch = content.match(frontmatterRegex);
+    const cache = this.app.metadataCache.getFileCache(file);
+
+    if ((location === 'frontmatter' || location === 'both') && frontmatterMatch && cache?.frontmatter) {
+      // Add to frontmatter tags
+      const frontmatterContent = frontmatterMatch[1];
+
+      if (frontmatterContent.includes('tags:')) {
+        // Add to existing tags array
+        const updatedFrontmatter = frontmatterContent.replace(
+          /tags:\s*\[(.*?)\]/s,
+          (match, tagsContent) => {
+            const tags = tagsContent ? tagsContent.split(',').map((t: string) => t.trim()) : [];
+            tags.push(`"${tagName}"`);
+            return `tags: [${tags.join(', ')}]`;
+          }
+        );
+        content = content.replace(frontmatterMatch[0], `---\n${updatedFrontmatter}\n---`);
+      } else {
+        // Add new tags field
+        const updatedFrontmatter = frontmatterContent + `\ntags: ["${tagName}"]`;
+        content = content.replace(frontmatterMatch[0], `---\n${updatedFrontmatter}\n---`);
+      }
+    } else if (location === 'inline' || location === 'both' || !frontmatterMatch) {
+      // Add as inline tag at the end of the file
+      if (!content.endsWith('\n')) {
+        content += '\n';
+      }
+      content += `\n#${tagName}`;
+    }
+
+    // Write the file if it was modified
+    if (content !== originalContent) {
+      await this.app.vault.adapter.write(file.path, content);
+    }
+  }
+
+  private async removeSingleTag(file: TFile, tagName: string, location: string): Promise<void> {
+    let content = await this.app.vault.read(file);
+    const originalContent = content;
+    const cache = this.app.metadataCache.getFileCache(file);
+
+    // Remove inline tags
+    if ((location === 'inline' || location === 'both') && cache?.tags) {
+      for (const tag of cache.tags) {
+        const cleanTag = tag.tag.replace(/^#/, '');
+        if (cleanTag === tagName) {
+          const tagPattern = new RegExp(`#${tagName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s|$)`, 'g');
+          content = content.replace(tagPattern, '');
+        }
+      }
+    }
+
+    // Remove from frontmatter tags
+    if ((location === 'frontmatter' || location === 'both') && cache?.frontmatter?.tags && Array.isArray(cache.frontmatter.tags)) {
+      const hasTag = cache.frontmatter.tags.some((tag: any) => tag.toString() === tagName);
+
+      if (hasTag) {
+        const frontmatterRegex = /^---\n([\s\S]*?)\n---/;
+        const frontmatterMatch = content.match(frontmatterRegex);
+
+        if (frontmatterMatch) {
+          const frontmatterContent = frontmatterMatch[1];
+          const updatedFrontmatter = frontmatterContent.replace(
+            /tags:\s*\[(.*?)\]/s,
+            (match, tagsContent) => {
+              const tags = tagsContent.split(',').map((t: string) => t.trim());
+              const filteredTags = tags.filter((tag: string) => {
+                const cleanTag = tag.replace(/^["']|["']$/g, '');
+                return cleanTag !== tagName;
+              });
+
+              if (filteredTags.length === 0) {
+                return ''; // Remove tags field entirely if empty
+              }
+              return `tags: [${filteredTags.join(', ')}]`;
+            }
+          ).replace(/\n\s*\n/g, '\n'); // Clean up empty lines
+
+          content = content.replace(frontmatterMatch[0], `---\n${updatedFrontmatter}\n---`);
+        }
+      }
+    }
+
+    // Clean up extra whitespace
+    content = content.replace(/\n\s*\n\s*\n/g, '\n\n');
+
+    // Write the file if it was modified
+    if (content !== originalContent) {
+      await this.app.vault.adapter.write(file.path, content);
+    }
+  }
+
+  private async processTagOperations(
+    file: TFile,
+    tags: string[],
+    operation: 'add' | 'remove',
+    location: string
+  ): Promise<{
+    summary: {
+      requested: number;
+      succeeded: number;
+      skipped: number;
+      failed: number;
+    };
+    results: Array<{
+      tag: string;
+      status: 'success' | 'skipped' | 'failed';
+      message: string;
+    }>;
+  }> {
+    const results: Array<{
+      tag: string;
+      status: 'success' | 'skipped' | 'failed';
+      message: string;
+    }> = [];
+    let succeeded = 0, skipped = 0, failed = 0;
+
+    // Validate all tags first
+    const validations = tags.map(tag => this.validateTagName(tag));
+    const validTags = validations.filter(v => v.isValid);
+    const invalidTags = validations.filter(v => !v.isValid);
+
+    // Record validation failures
+    for (const invalid of invalidTags) {
+      results.push({
+        tag: invalid.tag,
+        status: 'failed',
+        message: invalid.error || 'Validation failed'
+      });
+      failed++;
+    }
+
+    // Get current file tags (read once)
+    const cache = this.app.metadataCache.getFileCache(file);
+    const existingTags = new Set<string>();
+
+    // Collect existing tags from frontmatter
+    const frontmatterTags = cache?.frontmatter?.tags || cache?.frontmatter?.tag;
+    if (frontmatterTags) {
+      const tagArray = Array.isArray(frontmatterTags) ? frontmatterTags : [frontmatterTags];
+      tagArray.forEach((t: any) => existingTags.add(t.toString().replace(/^#/, '')));
+    }
+
+    // Collect existing inline tags
+    if (cache?.tags) {
+      cache.tags.forEach(t => existingTags.add(t.tag.replace(/^#/, '')));
+    }
+
+    // Process each valid tag
+    for (const validation of validTags) {
+      const normalizedTag = validation.tag.replace(/^#/, '');
+
+      try {
+        if (operation === 'add') {
+          if (existingTags.has(normalizedTag)) {
+            results.push({
+              tag: normalizedTag,
+              status: 'skipped',
+              message: `Tag already exists in ${location}`
+            });
+            skipped++;
+            continue;
+          }
+
+          // Use existing single-tag logic
+          await this.addSingleTag(file, normalizedTag, location);
+          existingTags.add(normalizedTag);
+
+          results.push({
+            tag: normalizedTag,
+            status: 'success',
+            message: `Added to ${location}`
+          });
+          succeeded++;
+
+        } else {  // remove
+          if (!existingTags.has(normalizedTag)) {
+            results.push({
+              tag: normalizedTag,
+              status: 'skipped',
+              message: 'Tag does not exist in file'
+            });
+            skipped++;
+            continue;
+          }
+
+          // Use existing single-tag logic
+          await this.removeSingleTag(file, normalizedTag, location);
+          existingTags.delete(normalizedTag);
+
+          results.push({
+            tag: normalizedTag,
+            status: 'success',
+            message: `Removed from ${location}`
+          });
+          succeeded++;
+        }
+
+      } catch (error) {
+        results.push({
+          tag: normalizedTag,
+          status: 'failed',
+          message: `Operation failed: ${error.message}`
+        });
+        failed++;
+      }
+    }
+
+    return {
+      summary: { requested: tags.length, succeeded, skipped, failed },
+      results
+    };
+  }
+
   async handleTagOperation(
     path: string,
     req: express.Request,
     res: express.Response
   ): Promise<void> {
-    const operation = req.get("Operation");
-    const tagName = req.get("Target");
-    
-    if (!tagName) {
+    // Parse request (supports both header and body)
+    const request = this.parseTagOperationRequest(req);
+
+    if (!request) {
       res.status(400).json({
         errorCode: 40001,
         message: "Target header with tag name is required"
       });
       return;
     }
-    
-    // Validate tag name
-    if (!/^[a-zA-Z0-9_\-\/]+$/.test(tagName)) {
-      res.status(400).json({
-        errorCode: 40008,
-        message: "Invalid tag name. Tags can only contain letters, numbers, underscores, hyphens, and forward slashes"
-      });
-      return;
-    }
-    
+
     // Check if file exists
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) {
       this.returnCannedResponse(res, { statusCode: 404 });
       return;
     }
-    
-    try {
-      let content = await this.app.vault.read(file);
-      const originalContent = content;
-      
-      if (operation === "add") {
-        // Check if tag already exists
-        const cache = this.app.metadataCache.getFileCache(file);
-        const existingTags = new Set<string>();
-        
-        // Collect existing inline tags
-        if (cache?.tags) {
-          for (const tag of cache.tags) {
-            existingTags.add(tag.tag.replace(/^#/, ''));
-          }
-        }
-        
-        // Collect existing frontmatter tags
-        if (cache?.frontmatter?.tags && Array.isArray(cache.frontmatter.tags)) {
-          for (const tag of cache.frontmatter.tags) {
-            existingTags.add(tag.toString());
-          }
-        }
-        
-        if (existingTags.has(tagName)) {
-          res.status(409).json({
-            errorCode: 40902,
-            message: "Tag already exists in this file"
-          });
-          return;
-        }
-        
-        // Add tag to frontmatter if it exists, otherwise add as inline tag
-        const frontmatterRegex = /^---\n([\s\S]*?)\n---/;
-        const frontmatterMatch = content.match(frontmatterRegex);
-        
-        if (frontmatterMatch && cache?.frontmatter) {
-          // Add to frontmatter tags
-          const frontmatterContent = frontmatterMatch[1];
-          
-          if (frontmatterContent.includes('tags:')) {
-            // Add to existing tags array
-            const updatedFrontmatter = frontmatterContent.replace(
-              /tags:\s*\[(.*?)\]/s,
-              (match, tagsContent) => {
-                const tags = tagsContent ? tagsContent.split(',').map((t: string) => t.trim()) : [];
-                tags.push(`"${tagName}"`);
-                return `tags: [${tags.join(', ')}]`;
-              }
-            );
-            content = content.replace(frontmatterMatch[0], `---\n${updatedFrontmatter}\n---`);
-          } else {
-            // Add new tags field
-            const updatedFrontmatter = frontmatterContent + `\ntags: ["${tagName}"]`;
-            content = content.replace(frontmatterMatch[0], `---\n${updatedFrontmatter}\n---`);
-          }
-        } else {
-          // Add as inline tag at the end of the file
-          if (!content.endsWith('\n')) {
-            content += '\n';
-          }
-          content += `\n#${tagName}`;
-        }
-        
-      } else if (operation === "remove") {
-        const cache = this.app.metadataCache.getFileCache(file);
-        let tagFound = false;
-        
-        // Remove inline tags
-        if (cache?.tags) {
-          for (const tag of cache.tags) {
-            const cleanTag = tag.tag.replace(/^#/, '');
-            if (cleanTag === tagName) {
-              const tagPattern = new RegExp(`#${tagName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s|$)`, 'g');
-              content = content.replace(tagPattern, '');
-              tagFound = true;
-            }
-          }
-        }
-        
-        // Remove from frontmatter tags
-        if (cache?.frontmatter?.tags && Array.isArray(cache.frontmatter.tags)) {
-          const hasTag = cache.frontmatter.tags.some(tag => tag.toString() === tagName);
-          
-          if (hasTag) {
-            const frontmatterRegex = /^---\n([\s\S]*?)\n---/;
-            const frontmatterMatch = content.match(frontmatterRegex);
-            
-            if (frontmatterMatch) {
-              const frontmatterContent = frontmatterMatch[1];
-              const updatedFrontmatter = frontmatterContent.replace(
-                /tags:\s*\[(.*?)\]/s,
-                (match, tagsContent) => {
-                  const tags = tagsContent.split(',').map((t: string) => t.trim());
-                  const filteredTags = tags.filter((tag: string) => {
-                    const cleanTag = tag.replace(/^["']|["']$/g, '');
-                    return cleanTag !== tagName;
-                  });
-                  
-                  if (filteredTags.length === 0) {
-                    return ''; // Remove tags field entirely if empty
-                  }
-                  return `tags: [${filteredTags.join(', ')}]`;
-                }
-              ).replace(/\n\s*\n/g, '\n'); // Clean up empty lines
-              
-              content = content.replace(frontmatterMatch[0], `---\n${updatedFrontmatter}\n---`);
-              tagFound = true;
-            }
-          }
-        }
-        
-        if (!tagFound) {
-          this.returnCannedResponse(res, { statusCode: 404 });
-          return;
-        }
-        
-        // Clean up extra whitespace
-        content = content.replace(/\n\s*\n\s*\n/g, '\n\n');
-      }
-      
-      // Write the file if it was modified
-      if (content !== originalContent) {
-        await this.app.vault.adapter.write(path, content);
-        
-        res.json({
-          message: operation === "add" ? "Tag added successfully" : "Tag removed successfully",
-          path,
-          tag: tagName,
-          operation
+
+    // Process operation
+    const { summary, results } = await this.processTagOperations(
+      file,
+      request.tags,
+      request.operation,
+      request.location
+    );
+
+    // Format response
+    if (request.isBatchOperation) {
+      // Multi-tag response
+      const httpStatus = summary.failed > 0 && summary.succeeded === 0 ? 400 : 200;
+
+      res.status(httpStatus).json({
+        ...(summary.failed > 0 && {
+          errorCode: 40008,
+          message: `Tag operation completed: ${summary.failed} tag(s) failed`
+        }),
+        summary,
+        results
+      });
+
+    } else {
+      // Single tag response (backward compatibility)
+      const result = results[0];
+
+      if (result.status === 'failed') {
+        res.status(400).json({
+          errorCode: 40008,
+          message: result.message
         });
-      } else {
-        res.status(304).json({
-          message: "No changes made",
-          path,
-          tag: tagName,
-          operation
-        });
+        return;
       }
-      
-    } catch (error) {
-      res.status(500).json({
-        errorCode: 50003,
-        message: `Failed to ${operation} tag: ${error.message}`
+
+      if (result.status === 'skipped' && request.operation === 'add') {
+        res.status(409).json({
+          errorCode: 40902,
+          message: "Tag already exists in this file"
+        });
+        return;
+      }
+
+      if (result.status === 'skipped' && request.operation === 'remove') {
+        this.returnCannedResponse(res, { statusCode: 404 });
+        return;
+      }
+
+      // Success
+      res.status(200).json({
+        message: `Tag ${request.operation === 'add' ? 'added' : 'removed'} successfully`,
+        path,
+        tag: result.tag,
+        operation: request.operation
       });
     }
   }
