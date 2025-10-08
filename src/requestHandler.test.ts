@@ -2929,4 +2929,241 @@ describe("requestHandler", () => {
       });
     });
   });
+
+  describe("Bookmarks API", () => {
+    describe("Route Registration Order", () => {
+      test("bookmarks routes registered before vault wildcard", () => {
+        // @ts-ignore: Access private property for testing
+        const routes = handler.api._router.stack
+          .filter((r: any) => r.route)
+          .map((r: any) => r.route.path);
+
+        const bookmarksIndex = routes.findIndex((p: string) => p.startsWith('/bookmarks'));
+        const vaultIndex = routes.indexOf('/vault/*');
+
+        expect(bookmarksIndex).toBeGreaterThan(-1);
+        expect(vaultIndex).toBeGreaterThan(-1);
+        expect(bookmarksIndex).toBeLessThan(vaultIndex);
+      });
+    });
+
+    describe("Plugin Access Helpers", () => {
+      beforeEach(() => {
+        // Reset bookmarks plugin state
+        app.internalPlugins.plugins.bookmarks.enabled = true;
+        app.internalPlugins.plugins.bookmarks.instance.bookmarkLookup = {};
+      });
+
+      test("getBookmarksPlugin returns instance when enabled", () => {
+        // @ts-ignore: Access private method for testing
+        const instance = handler.getBookmarksPlugin();
+        expect(instance).not.toBeNull();
+        expect(instance).toHaveProperty('bookmarkLookup');
+        expect(instance).toHaveProperty('getItemTitle');
+      });
+
+      test("getBookmarksPlugin returns null when plugin disabled", () => {
+        app.internalPlugins.plugins.bookmarks.enabled = false;
+        // @ts-ignore: Access private method for testing
+        const instance = handler.getBookmarksPlugin();
+        expect(instance).toBeNull();
+      });
+
+      test("getBookmarksPlugin returns null when plugin missing", () => {
+        // @ts-ignore: Simulate missing plugin
+        delete app.internalPlugins.plugins.bookmarks;
+        // @ts-ignore: Access private method for testing
+        const instance = handler.getBookmarksPlugin();
+        expect(instance).toBeNull();
+      });
+
+      test("enhanceBookmark falls back to path when plugin unavailable", () => {
+        app.internalPlugins.plugins.bookmarks.enabled = false;
+        const item = { type: 'file', path: 'test.md', ctime: 123 };
+        // @ts-ignore: Access private method for testing
+        const enhanced = handler.enhanceBookmark(item);
+
+        expect(enhanced.title).toBe('test.md'); // Fallback to path
+        expect(enhanced.path).toBe('test.md');
+        expect(enhanced.type).toBe('file');
+        expect(enhanced.ctime).toBe(123);
+      });
+
+      test("enhanceBookmark uses getItemTitle when plugin available", () => {
+        const item = { type: 'file', path: 'daily/2025-01-01.md', ctime: 123 };
+        // @ts-ignore: Access private method for testing
+        const enhanced = handler.enhanceBookmark(item);
+
+        expect(enhanced.title).toBe('2025-01-01.md'); // Mock uses basename
+        expect(enhanced.path).toBe('daily/2025-01-01.md');
+      });
+
+      test("enhanceBookmark handles groups recursively", () => {
+        const item = {
+          type: 'group',
+          path: 'Menuiserie',
+          ctime: 123,
+          items: [
+            { type: 'file', path: 'file1.md', ctime: 456 },
+            { type: 'file', path: 'file2.md', ctime: 789 }
+          ]
+        };
+        // @ts-ignore: Access private method for testing
+        const enhanced = handler.enhanceBookmark(item);
+
+        expect(enhanced.items).toBeDefined();
+        expect(enhanced.items).toHaveLength(2);
+        expect(enhanced.items[0].title).toBe('file1.md');
+        expect(enhanced.items[1].title).toBe('file2.md');
+      });
+    });
+
+    describe("GET /bookmarks/", () => {
+      beforeEach(() => {
+        // Setup mock bookmarks
+        app.internalPlugins.plugins.bookmarks.enabled = true;
+        app.internalPlugins.plugins.bookmarks.instance.bookmarkLookup = {
+          'daily/2025-01-01.md': {
+            type: 'file',
+            path: 'daily/2025-01-01.md',
+            ctime: 1704067200000
+          },
+          'Menuiserie': {
+            type: 'folder',
+            path: 'Menuiserie',
+            ctime: 1716625331149
+          },
+          'notes/meeting.md#Action Items': {
+            type: 'heading',
+            path: 'notes/meeting.md#Action Items',
+            ctime: 1704070000000
+          }
+        };
+      });
+
+      test("returns all bookmarks with titles", async () => {
+        const response = await request(server)
+          .get('/bookmarks/')
+          .set('Authorization', `Bearer ${API_KEY}`)
+          .expect(200);
+
+        expect(response.body.bookmarks).toBeInstanceOf(Array);
+        expect(response.body.bookmarks).toHaveLength(3);
+
+        const firstBookmark = response.body.bookmarks[0];
+        expect(firstBookmark).toHaveProperty('path');
+        expect(firstBookmark).toHaveProperty('title');
+        expect(firstBookmark).toHaveProperty('type');
+        expect(firstBookmark).toHaveProperty('ctime');
+      });
+
+      test("returns 503 when plugin disabled", async () => {
+        app.internalPlugins.plugins.bookmarks.enabled = false;
+
+        const response = await request(server)
+          .get('/bookmarks/')
+          .set('Authorization', `Bearer ${API_KEY}`)
+          .expect(503);
+
+        expect(response.body.message).toContain('not enabled');
+      });
+
+      test("filters by type when ?type= provided", async () => {
+        const response = await request(server)
+          .get('/bookmarks/?type=file')
+          .set('Authorization', `Bearer ${API_KEY}`)
+          .expect(200);
+
+        expect(response.body.bookmarks).toBeInstanceOf(Array);
+        response.body.bookmarks.forEach((b: any) => {
+          expect(b.type).toBe('file');
+        });
+      });
+
+      test("returns empty array when no bookmarks match filter", async () => {
+        const response = await request(server)
+          .get('/bookmarks/?type=search')
+          .set('Authorization', `Bearer ${API_KEY}`)
+          .expect(200);
+
+        expect(response.body.bookmarks).toEqual([]);
+      });
+
+      test("requires authentication", async () => {
+        await request(server)
+          .get('/bookmarks/')
+          .expect(401);
+      });
+    });
+
+    describe("GET /bookmarks/:path", () => {
+      beforeEach(() => {
+        // Setup mock bookmarks
+        app.internalPlugins.plugins.bookmarks.enabled = true;
+        app.internalPlugins.plugins.bookmarks.instance.bookmarkLookup = {
+          'daily/2025-01-01.md': {
+            type: 'file',
+            path: 'daily/2025-01-01.md',
+            ctime: 1704067200000
+          },
+          'notes/meeting.md#Action Items': {
+            type: 'heading',
+            path: 'notes/meeting.md#Action Items',
+            ctime: 1704070000000
+          }
+        };
+      });
+
+      test("returns single bookmark with URL-decoded path", async () => {
+        const response = await request(server)
+          .get('/bookmarks/daily%2F2025-01-01.md')
+          .set('Authorization', `Bearer ${API_KEY}`)
+          .expect(200);
+
+        expect(response.body.path).toBe('daily/2025-01-01.md');
+        expect(response.body.type).toBe('file');
+        expect(response.body.title).toBeDefined();
+        expect(response.body.ctime).toBe(1704067200000);
+      });
+
+      test("handles paths with # (heading bookmarks)", async () => {
+        const headingPath = 'notes/meeting.md#Action Items';
+        const encoded = encodeURIComponent(headingPath);
+
+        const response = await request(server)
+          .get(`/bookmarks/${encoded}`)
+          .set('Authorization', `Bearer ${API_KEY}`)
+          .expect(200);
+
+        expect(response.body.path).toBe(headingPath);
+        expect(response.body.type).toBe('heading');
+      });
+
+      test("returns 404 for non-existent bookmark", async () => {
+        const response = await request(server)
+          .get('/bookmarks/nonexistent.md')
+          .set('Authorization', `Bearer ${API_KEY}`)
+          .expect(404);
+
+        expect(response.body.message).toContain('No bookmark exists');
+      });
+
+      test("returns 503 when plugin disabled", async () => {
+        app.internalPlugins.plugins.bookmarks.enabled = false;
+
+        const response = await request(server)
+          .get('/bookmarks/daily%2F2025-01-01.md')
+          .set('Authorization', `Bearer ${API_KEY}`)
+          .expect(503);
+
+        expect(response.body.message).toContain('not enabled');
+      });
+
+      test("requires authentication", async () => {
+        await request(server)
+          .get('/bookmarks/daily%2F2025-01-01.md')
+          .expect(401);
+      });
+    });
+  });
 });
