@@ -1,5 +1,29 @@
 # New Features Changelog
 
+## Version 4.1.0 (2025-10-08) ✅
+
+### Multi-Tag Operations
+- **Batch tag operations** - Add or remove multiple tags in a single API call
+- **Dual format support** - Use headers (simple) OR JSON body (batch operations)
+- **Best-effort semantics** - Operations continue on partial failure with detailed per-tag results
+- **Performance optimized** - Single read/write cycle (10x-100x speedup vs sequential operations)
+
+### API Enhancements
+- **PATCH /vault/{filepath}** with multiple tags:
+  - Header format: `Tags: tag1,tag2,tag3` (backward compatible)
+  - JSON body format: `{"tags": ["tag1", "tag2", "tag3"]}` (new)
+  - Operations: `add` or `remove` with `Location: frontmatter|inline|both`
+  - Response includes per-tag success/failure status
+
+### Technical Improvements
+- **Comprehensive validation** - Tag format, length (max 100 chars), empty checks
+- **Automatic deduplication** - Skips tags that already exist/don't exist
+- **Improved test coverage** - Added 12 unit tests for better test pyramid (185 tests passing)
+- **In-memory processing** - Pure functions for tag manipulation without I/O overhead
+
+### Breaking Changes
+**NONE** - Fully backward compatible with existing single-tag operations
+
 ## Version 4.0.1 (2025-09-28) ✅
 
 ### Bug Fixes
@@ -112,6 +136,52 @@ curl https://localhost:27124/vault/my-note.md?format=plain \
   -H "Authorization: Bearer YOUR_API_KEY"
 ```
 
+### Multi-Tag Operations Examples
+```bash
+# Add multiple tags using JSON body (batch operation)
+curl -X PATCH https://localhost:27124/vault/my-note.md \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Target-Type: tag" \
+  -H "Operation: add" \
+  -H "Location: frontmatter" \
+  -d '{"tags": ["project", "important", "work"]}'
+
+# Add multiple tags using header format (simple)
+curl -X PATCH https://localhost:27124/vault/my-note.md \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Target-Type: tag" \
+  -H "Operation: add" \
+  -H "Location: frontmatter" \
+  -H "Tags: project,important,work"
+
+# Remove multiple tags with detailed results
+curl -X PATCH https://localhost:27124/vault/my-note.md \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -H "Target-Type: tag" \
+  -H "Operation: remove" \
+  -H "Location: both" \
+  -d '{"tags": ["archived", "old", "deprecated"]}'
+
+# Response format (multi-tag):
+# {
+#   "summary": {
+#     "operation": "add",
+#     "location": "frontmatter",
+#     "total": 3,
+#     "succeeded": 2,
+#     "skipped": 1,
+#     "failed": 0
+#   },
+#   "results": [
+#     {"tag": "project", "status": "success", "message": "Added to frontmatter"},
+#     {"tag": "important", "status": "success", "message": "Added to frontmatter"},
+#     {"tag": "work", "status": "skipped", "message": "Tag already exists"}
+#   ]
+# }
+```
+
 ### Tag Management Examples
 ```bash
 # List all tags
@@ -123,7 +193,7 @@ curl -X PATCH https://localhost:27124/tags/old-tag/ \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "X-New-Tag-Name: new-tag"
 
-# Add tag to a file
+# Add single tag to a file
 curl -X PATCH https://localhost:27124/vault/my-note.md \
   -H "Authorization: Bearer YOUR_API_KEY" \
   -H "Target-Type: tag" \
