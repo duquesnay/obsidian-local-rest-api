@@ -1597,20 +1597,45 @@ export default class RequestHandler {
       const frontmatterContent = frontmatterMatch[1];
 
       if (frontmatterContent.includes('tags:')) {
-        // Add to existing tags array
-        const updatedFrontmatter = frontmatterContent.replace(
-          /tags:\s*\[(.*?)\]/s,
-          (match, tagsContent) => {
-            const tags = tagsContent ? tagsContent.split(',').map((t: string) => t.trim()) : [];
-            tags.push(`"${tagName}"`);
-            return `tags: [${tags.join(', ')}]`;
+        let updatedFrontmatter = frontmatterContent;
+
+        // Try YAML list format first (most common in Obsidian)
+        // Matches: tags:\n  - tag1\n  - tag2
+        const yamlListMatch = frontmatterContent.match(/tags:\s*\n(\s+-\s+.+\n?)*/);
+        if (yamlListMatch) {
+          // YAML list format - add new tag as list item
+          updatedFrontmatter = frontmatterContent.replace(
+            /(tags:\s*\n(?:\s+-\s+.+\n?)*)/,
+            (match) => {
+              // Preserve existing format and add new tag
+              if (match.endsWith('\n')) {
+                return match + `  - ${tagName}\n`;
+              } else {
+                return match + `\n  - ${tagName}\n`;
+              }
+            }
+          );
+        } else {
+          // Try inline array format: tags: [tag1, tag2]
+          const inlineMatch = frontmatterContent.match(/tags:\s*\[(.*?)\]/s);
+          if (inlineMatch) {
+            updatedFrontmatter = frontmatterContent.replace(
+              /tags:\s*\[(.*?)\]/s,
+              (match, tagsContent) => {
+                const tags = tagsContent ? tagsContent.split(',').map((t: string) => t.trim()) : [];
+                tags.push(`"${tagName}"`);
+                return `tags: [${tags.join(', ')}]`;
+              }
+            );
           }
-        );
+          // else: tags: exists but in unknown format - don't modify
+        }
+
         content = content.replace(frontmatterMatch[0], `---\n${updatedFrontmatter}\n---`);
       } else {
-        // Add new tags field
-        const updatedFrontmatter = frontmatterContent + `\ntags: ["${tagName}"]`;
-        content = content.replace(frontmatterMatch[0], `---\n${updatedFrontmatter}\n---`);
+        // Add new tags field in YAML list format (Obsidian standard)
+        const updatedFrontmatter = frontmatterContent + `\ntags:\n  - ${tagName}\n`;
+        content = content.replace(frontmatterMatch[0], `---\n${updatedFrontmatter}---`);
       }
     } else if (location === 'inline' || location === 'both' || !frontmatterMatch) {
       // Add as inline tag at the end of the file
@@ -1661,22 +1686,40 @@ export default class RequestHandler {
 
         if (frontmatterMatch) {
           const frontmatterContent = frontmatterMatch[1];
-          const updatedFrontmatter = frontmatterContent.replace(
-            /tags:\s*\[(.*?)\]/s,
-            (match, tagsContent) => {
-              const tags = tagsContent.split(',').map((t: string) => t.trim());
-              const filteredTags = tags.filter((tag: string) => {
-                const cleanTag = tag.replace(/^["']|["']$/g, '');
-                return cleanTag !== tagName;
-              });
+          let updatedFrontmatter = frontmatterContent;
 
-              if (filteredTags.length === 0) {
-                return ''; // Remove tags field entirely if empty
-              }
-              return `tags: [${filteredTags.join(', ')}]`;
+          // Try YAML list format first
+          const yamlListMatch = frontmatterContent.match(/tags:\s*\n(\s+-\s+.+\n?)*/);
+          if (yamlListMatch) {
+            // YAML list format - remove the specific tag line
+            const tagLineRegex = new RegExp(`\\s+-\\s+${tagName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n?`, 'g');
+            updatedFrontmatter = frontmatterContent.replace(tagLineRegex, '');
+
+            // If no tags remain, remove the tags field entirely
+            if (!updatedFrontmatter.match(/tags:\s*\n\s+-\s+/)) {
+              updatedFrontmatter = updatedFrontmatter.replace(/tags:\s*\n/, '');
             }
-          ).replace(/\n\s*\n/g, '\n'); // Clean up empty lines
+          } else {
+            // Try inline array format
+            updatedFrontmatter = frontmatterContent.replace(
+              /tags:\s*\[(.*?)\]/s,
+              (match, tagsContent) => {
+                const tags = tagsContent.split(',').map((t: string) => t.trim());
+                const filteredTags = tags.filter((tag: string) => {
+                  const cleanTag = tag.replace(/^["']|["']$/g, '');
+                  return cleanTag !== tagName;
+                });
 
+                if (filteredTags.length === 0) {
+                  return ''; // Remove tags field entirely if empty
+                }
+                return `tags: [${filteredTags.join(', ')}]`;
+              }
+            );
+          }
+
+          // Clean up empty lines
+          updatedFrontmatter = updatedFrontmatter.replace(/\n\s*\n/g, '\n');
           content = content.replace(frontmatterMatch[0], `---\n${updatedFrontmatter}\n---`);
         }
       }
@@ -1747,70 +1790,144 @@ export default class RequestHandler {
       cache.tags.forEach(t => existingTags.add(t.tag.replace(/^#/, '')));
     }
 
-    // Process each valid tag
-    // Process each valid tag IN-MEMORY (no I/O in loop)
-    for (const validation of validTags) {
-      const normalizedTag = validation.tag.replace(/^#/, '');
+    // Handle frontmatter tags using Obsidian's native API (single operation for all tags)
+    if (location === 'frontmatter' || location === 'both') {
+      const tagsToProcess = validTags
+        .map(v => v.tag.replace(/^#/, ''))
+        .filter(tag => operation === 'add' ? !existingTags.has(tag) : existingTags.has(tag));
 
-      try {
-        if (operation === 'add') {
-          if (existingTags.has(normalizedTag)) {
-            results.push({
-              tag: normalizedTag,
-              status: 'skipped',
-              message: `Tag already exists in ${location}`
-            });
-            skipped++;
-            continue;
-          }
+      if (tagsToProcess.length > 0) {
+        try {
+          await this.app.fileManager.processFrontMatter(file, (frontmatter) => {
+            frontmatter.tags = frontmatter.tags || [];
 
-          // Apply tag modification in-memory
-          content = this.addTagToContent(content, normalizedTag, location, cache);
-          existingTags.add(normalizedTag);
-
-          results.push({
-            tag: normalizedTag,
-            status: 'success',
-            message: `Added to ${location}`
+            for (const tag of tagsToProcess) {
+              if (operation === 'add') {
+                if (!frontmatter.tags.includes(tag)) {
+                  frontmatter.tags.push(tag);
+                }
+              } else {
+                frontmatter.tags = frontmatter.tags.filter((t: string) => t !== tag);
+              }
+            }
           });
-          succeeded++;
 
-        } else {  // remove
-          if (!existingTags.has(normalizedTag)) {
+          // Record results for frontmatter operations
+          for (const tag of tagsToProcess) {
             results.push({
-              tag: normalizedTag,
-              status: 'skipped',
-              message: 'Tag does not exist in file'
+              tag,
+              status: 'success',
+              message: operation === 'add' ? 'Added to frontmatter' : 'Removed from frontmatter'
             });
-            skipped++;
-            continue;
+            succeeded++;
+            if (operation === 'add') {
+              existingTags.add(tag);
+            } else {
+              existingTags.delete(tag);
+            }
           }
-
-          // Apply tag modification in-memory
-          content = this.removeTagFromContent(content, normalizedTag, location, cache);
-          existingTags.delete(normalizedTag);
-
-          results.push({
-            tag: normalizedTag,
-            status: 'success',
-            message: `Removed from ${location}`
-          });
-          succeeded++;
+        } catch (error) {
+          // Handle YAML parsing errors or other frontmatter issues
+          for (const tag of tagsToProcess) {
+            results.push({
+              tag,
+              status: 'failed',
+              message: `Frontmatter operation failed: ${error.message}`
+            });
+            failed++;
+          }
         }
+      }
 
-      } catch (error) {
-        results.push({
-          tag: normalizedTag,
-          status: 'failed',
-          message: `Operation failed: ${error.message}`
-        });
-        failed++;
+      // Record skipped tags
+      for (const validation of validTags) {
+        const normalizedTag = validation.tag.replace(/^#/, '');
+        if (!tagsToProcess.includes(normalizedTag)) {
+          results.push({
+            tag: normalizedTag,
+            status: 'skipped',
+            message: operation === 'add' ? 'Tag already exists' : 'Tag not found'
+          });
+          skipped++;
+        }
       }
     }
 
-    // Write file ONCE if modified (performance optimization)
-    if (content !== originalContent) {
-      await this.app.vault.adapter.write(file.path, content);
+    // Handle inline tags (if location is 'inline' or 'both')
+    if (location === 'inline' || location === 'both') {
+      content = await this.app.vault.read(file);
+
+      for (const validation of validTags) {
+        const normalizedTag = validation.tag.replace(/^#/, '');
+
+        try {
+          if (operation === 'add') {
+            if (existingTags.has(normalizedTag) && location === 'inline') {
+              results.push({
+                tag: normalizedTag,
+                status: 'skipped',
+                message: 'Tag already exists'
+              });
+              skipped++;
+              continue;
+            }
+
+            // Add inline tag
+            if (!content.endsWith('\n')) {
+              content += '\n';
+            }
+            content += `\n#${normalizedTag}`;
+            existingTags.add(normalizedTag);
+
+            if (location === 'inline') {
+              results.push({
+                tag: normalizedTag,
+                status: 'success',
+                message: 'Added to inline tags'
+              });
+              succeeded++;
+            }
+
+          } else {  // remove
+            if (!existingTags.has(normalizedTag) && location === 'inline') {
+              results.push({
+                tag: normalizedTag,
+                status: 'skipped',
+                message: 'Tag not found'
+              });
+              skipped++;
+              continue;
+            }
+
+            // Remove inline tag using string manipulation
+            const tagPattern = new RegExp(`#${normalizedTag.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=\\s|$)`, 'g');
+            content = content.replace(tagPattern, '');
+            existingTags.delete(normalizedTag);
+
+            if (location === 'inline') {
+              results.push({
+                tag: normalizedTag,
+                status: 'success',
+                message: 'Removed from inline tags'
+              });
+              succeeded++;
+            }
+          }
+
+        } catch (error) {
+          results.push({
+            tag: normalizedTag,
+            status: 'failed',
+            message: `Operation failed: ${error.message}`
+          });
+          failed++;
+        }
+      }
+
+      // Write file for inline tag operations ONCE
+      if (content !== originalContent) {
+        await this.app.vault.adapter.write(file.path, content);
+      }
     }
 
     return {

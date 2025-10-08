@@ -169,12 +169,22 @@ export class Workspace {
   }
 }
 
+export class FileManager {
+  async processFrontMatter(file: TFile, fn: (frontmatter: any) => void | Promise<void>): Promise<void> {
+    // Mock implementation: read file, parse frontmatter, call fn, write back
+    // For testing, we'll just call the function with an empty object
+    const frontmatter = {};
+    await fn(frontmatter);
+  }
+}
+
 export class App {
   _executeCommandById: [string];
 
   vault = new Vault();
   workspace = new Workspace();
   metadataCache = new MetadataCache();
+  fileManager = new FileManager();
   commands = {
     commands: {} as Record<string, Command>,
 
