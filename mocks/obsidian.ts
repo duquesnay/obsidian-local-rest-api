@@ -182,6 +182,24 @@ export class App {
       this._executeCommandById = [id];
     },
   };
+  internalPlugins: any = {
+    plugins: {
+      bookmarks: {
+        enabled: true,
+        instance: {
+          description: "Bookmark files and searches",
+          id: "bookmarks",
+          name: "Bookmarks",
+          bookmarkLookup: {} as Record<string, any>,
+          getItemTitle: (item: any) => {
+            // Mock title generation: use basename of path
+            const basename = item.path.split('/').pop();
+            return basename || item.path;
+          }
+        }
+      }
+    }
+  };
 }
 
 export class Command {

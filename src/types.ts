@@ -84,29 +84,7 @@ declare module "obsidian" {
         [key: string]: PluginManifest;
       };
     };
-    internalPlugins: {
-      plugins: {
-        [key: string]: {
-          instance: {
-            description: string;
-            id: string;
-            name: string;
-          };
-          enabled: boolean;
-        };
-        workspaces: {
-          instance: {
-            description: string;
-            id: string;
-            name: string;
-            activeWorkspace: Workspace;
-            saveWorkspace(workspace: Workspace): void;
-            loadWorkspace(workspace: string): void;
-          };
-          enabled: boolean;
-        };
-      };
-    };
+    internalPlugins: any;
   }
   interface View {
     file: TFile;
