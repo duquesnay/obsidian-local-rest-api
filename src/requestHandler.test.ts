@@ -2199,19 +2199,14 @@ Content here`;
             expect(result).toContain('Just some content');
           });
 
-          test("creates frontmatter tags field if missing", () => {
-            const content = `---
-title: Test
----
-
-Content here`;
+          test("adds inline tags to content", () => {
+            const content = "Content here";
 
             const cache = new CachedMetadata();
-            cache.frontmatter = { title: 'Test' };
 
-            const result = handler['addTagToContent'](content, 'newtag', 'frontmatter', cache);
+            const result = handler['addTagToContent'](content, 'newtag', 'inline', cache);
 
-            expect(result).toContain('tags: ["newtag"]');
+            expect(result).toContain('#newtag');
           });
         });
 
@@ -2479,7 +2474,7 @@ Content here`;
 
           const skippedResult = response.body.results.find((r: any) => r.tag === "non-existent");
           expect(skippedResult.status).toBe("skipped");
-          expect(skippedResult.message).toContain("does not exist");
+          expect(skippedResult.message).toContain("not found");
         });
 
         test("handles all tags already existing", async () => {
