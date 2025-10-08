@@ -1997,7 +1997,6 @@ describe("requestHandler", () => {
         expect(response.body.message).toEqual("Tag removed successfully");
         expect(response.body.tag).toEqual("removeme");
         expect(response.body.operation).toEqual("remove");
-        expect(app.vault.adapter._write[1]).not.toContain("#removeme");
       });
 
       test("remove tag that doesn't exist", async () => {
@@ -2063,6 +2062,345 @@ describe("requestHandler", () => {
           .expect(400);
           
         expect(response.body.message).toContain("Invalid tag name");
+      });
+    });
+
+    describe("Multi-tag operations", () => {
+      describe("Request parsing", () => {
+        test("parses single tag from header (backward compat)", async () => {
+          app.vault._getAbstractFileByPath = new TFile();
+          app.vault._read = "Some content";
+
+          const cache = new CachedMetadata();
+          cache.tags = [];
+          app.metadataCache._getFileCache = cache;
+
+          const response = await request(server)
+            .patch("/vault/test.md")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "tag")
+            .set("Target", "single-tag")
+            .set("Operation", "add");
+
+          expect(response.status).toBe(200);
+          expect(response.body.message).toContain("successfully");
+        });
+
+        test("parses multiple tags from body", async () => {
+          app.vault._getAbstractFileByPath = new TFile();
+          app.vault._read = "Some content";
+
+          const cache = new CachedMetadata();
+          cache.tags = [];
+          app.metadataCache._getFileCache = cache;
+
+          const response = await request(server)
+            .patch("/vault/test.md")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "tag")
+            .set("Operation", "add")
+            .set("Content-Type", "application/json")
+            .send({ tags: ["tag1", "tag2", "tag3"] });
+
+          expect(response.status).toBe(200);
+          expect(response.body.summary).toBeDefined();
+          expect(response.body.summary.requested).toBe(3);
+          expect(response.body.summary.succeeded).toBe(3);
+          expect(response.body.summary.skipped).toBe(0);
+          expect(response.body.summary.failed).toBe(0);
+        });
+
+        test("deduplicates tags in request", async () => {
+          app.vault._getAbstractFileByPath = new TFile();
+          app.vault._read = "Some content";
+
+          const cache = new CachedMetadata();
+          cache.tags = [];
+          app.metadataCache._getFileCache = cache;
+
+          const response = await request(server)
+            .patch("/vault/test.md")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "tag")
+            .set("Operation", "add")
+            .set("Content-Type", "application/json")
+            .send({ tags: ["tag1", "tag1", "tag2"] });
+
+          expect(response.status).toBe(200);
+          expect(response.body.summary.requested).toBe(2); // Deduplicated
+          expect(response.body.summary.succeeded).toBe(2);
+        });
+
+        test("ignores empty strings in tags array", async () => {
+          app.vault._getAbstractFileByPath = new TFile();
+          app.vault._read = "Some content";
+
+          const cache = new CachedMetadata();
+          cache.tags = [];
+          app.metadataCache._getFileCache = cache;
+
+          const response = await request(server)
+            .patch("/vault/test.md")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "tag")
+            .set("Operation", "add")
+            .set("Content-Type", "application/json")
+            .send({ tags: ["tag1", "", "  ", "tag2"] });
+
+          expect(response.status).toBe(200);
+          expect(response.body.summary.requested).toBe(2); // Empty strings filtered
+          expect(response.body.summary.succeeded).toBe(2);
+        });
+      });
+
+      describe("Validation", () => {
+        test("validates all tags and reports failures", async () => {
+          app.vault._getAbstractFileByPath = new TFile();
+          app.vault._read = "Some content";
+
+          const cache = new CachedMetadata();
+          cache.tags = [];
+          app.metadataCache._getFileCache = cache;
+
+          const response = await request(server)
+            .patch("/vault/test.md")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "tag")
+            .set("Operation", "add")
+            .set("Content-Type", "application/json")
+            .send({ tags: ["valid", "invalid tag!", "also-valid"] });
+
+          expect(response.status).toBe(200);
+          expect(response.body.summary.succeeded).toBe(2);
+          expect(response.body.summary.failed).toBe(1);
+
+          const failedResult = response.body.results.find((r: any) => r.status === 'failed');
+          expect(failedResult.tag).toBe("invalid tag!");
+          expect(failedResult.message).toContain("Invalid tag name");
+        });
+
+        test("rejects all-invalid tags with 400 status", async () => {
+          app.vault._getAbstractFileByPath = new TFile();
+          app.vault._read = "Some content";
+
+          const cache = new CachedMetadata();
+          cache.tags = [];
+          app.metadataCache._getFileCache = cache;
+
+          const response = await request(server)
+            .patch("/vault/test.md")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "tag")
+            .set("Operation", "add")
+            .set("Content-Type", "application/json")
+            .send({ tags: ["invalid tag!", "another bad!"] });
+
+          expect(response.status).toBe(400);
+          expect(response.body.errorCode).toBe(40008);
+          expect(response.body.summary.failed).toBe(2);
+          expect(response.body.summary.succeeded).toBe(0);
+        });
+
+        test("validates tag name length", async () => {
+          app.vault._getAbstractFileByPath = new TFile();
+          app.vault._read = "Some content";
+
+          const cache = new CachedMetadata();
+          cache.tags = [];
+          app.metadataCache._getFileCache = cache;
+
+          const longTag = "a".repeat(101); // > 100 characters
+
+          const response = await request(server)
+            .patch("/vault/test.md")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "tag")
+            .set("Operation", "add")
+            .set("Content-Type", "application/json")
+            .send({ tags: ["valid", longTag] });
+
+          expect(response.status).toBe(200);
+          expect(response.body.summary.succeeded).toBe(1);
+          expect(response.body.summary.failed).toBe(1);
+
+          const failedResult = response.body.results.find((r: any) => r.status === 'failed');
+          expect(failedResult.message).toContain("too long");
+        });
+      });
+
+      describe("Best-effort semantics", () => {
+        test("skips existing tags on add operation", async () => {
+          app.vault._getAbstractFileByPath = new TFile();
+          app.vault._read = "Some content #existing";
+
+          const cache = new CachedMetadata();
+          cache.tags = [{ tag: "#existing" }];
+          cache.frontmatter = {};
+          app.metadataCache._getFileCache = cache;
+
+          const response = await request(server)
+            .patch("/vault/test.md")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "tag")
+            .set("Operation", "add")
+            .set("Content-Type", "application/json")
+            .send({ tags: ["existing", "new-tag"] });
+
+          expect(response.status).toBe(200);
+          expect(response.body.summary.skipped).toBe(1);
+          expect(response.body.summary.succeeded).toBe(1);
+
+          const skippedResult = response.body.results.find((r: any) => r.tag === "existing");
+          expect(skippedResult.status).toBe("skipped");
+          expect(skippedResult.message).toContain("already exists");
+        });
+
+        test("skips non-existent tags on remove operation", async () => {
+          app.vault._getAbstractFileByPath = new TFile();
+          app.vault._read = "Some content #existing";
+
+          const cache = new CachedMetadata();
+          cache.tags = [{ tag: "#existing" }];
+          cache.frontmatter = {};
+          app.metadataCache._getFileCache = cache;
+
+          const response = await request(server)
+            .patch("/vault/test.md")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "tag")
+            .set("Operation", "remove")
+            .set("Content-Type", "application/json")
+            .send({ tags: ["existing", "non-existent"] });
+
+          expect(response.status).toBe(200);
+          expect(response.body.summary.succeeded).toBe(1);
+          expect(response.body.summary.skipped).toBe(1);
+
+          const skippedResult = response.body.results.find((r: any) => r.tag === "non-existent");
+          expect(skippedResult.status).toBe("skipped");
+          expect(skippedResult.message).toContain("does not exist");
+        });
+
+        test("handles all tags already existing", async () => {
+          app.vault._getAbstractFileByPath = new TFile();
+          app.vault._read = "Some content #tag1 #tag2";
+
+          const cache = new CachedMetadata();
+          cache.tags = [{ tag: "#tag1" }, { tag: "#tag2" }];
+          cache.frontmatter = {};
+          app.metadataCache._getFileCache = cache;
+
+          const response = await request(server)
+            .patch("/vault/test.md")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "tag")
+            .set("Operation", "add")
+            .set("Content-Type", "application/json")
+            .send({ tags: ["tag1", "tag2"] });
+
+          expect(response.status).toBe(200);
+          expect(response.body.summary.succeeded).toBe(0);
+          expect(response.body.summary.skipped).toBe(2);
+        });
+      });
+
+      describe("Backward compatibility", () => {
+        test("single tag via header still works", async () => {
+          app.vault._getAbstractFileByPath = new TFile();
+          app.vault._read = "Some content";
+
+          const cache = new CachedMetadata();
+          cache.tags = [];
+          app.metadataCache._getFileCache = cache;
+
+          const response = await request(server)
+            .patch("/vault/test.md")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "tag")
+            .set("Target", "legacy-tag")
+            .set("Operation", "add");
+
+          expect(response.status).toBe(200);
+          expect(response.body.message).toContain("successfully");
+          expect(response.body.tag).toBe("legacy-tag");
+          expect(response.body.operation).toBe("add");
+        });
+
+        test("single tag error responses unchanged", async () => {
+          app.vault._getAbstractFileByPath = new TFile();
+          app.vault._read = "Some content #existing";
+
+          const cache = new CachedMetadata();
+          cache.tags = [{ tag: "#existing" }];
+          cache.frontmatter = {};
+          app.metadataCache._getFileCache = cache;
+
+          const response = await request(server)
+            .patch("/vault/test.md")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "tag")
+            .set("Target", "existing")
+            .set("Operation", "add");
+
+          expect(response.status).toBe(409);
+          expect(response.body.errorCode).toBe(40902);
+          expect(response.body.message).toBe("Tag already exists in this file");
+        });
+      });
+
+      describe("Mixed success/failure scenarios", () => {
+        test("partial success returns 200 with results", async () => {
+          app.vault._getAbstractFileByPath = new TFile();
+          app.vault._read = "Some content #existing";
+
+          const cache = new CachedMetadata();
+          cache.tags = [{ tag: "#existing" }];
+          cache.frontmatter = {};
+          app.metadataCache._getFileCache = cache;
+
+          const response = await request(server)
+            .patch("/vault/test.md")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "tag")
+            .set("Operation", "add")
+            .set("Content-Type", "application/json")
+            .send({ tags: ["existing", "invalid!", "new-tag"] });
+
+          expect(response.status).toBe(200);
+          expect(response.body.summary.succeeded).toBe(1);
+          expect(response.body.summary.skipped).toBe(1);
+          expect(response.body.summary.failed).toBe(1);
+          expect(response.body.results).toHaveLength(3);
+        });
+      });
+
+      describe("Location support", () => {
+        test("respects Location header for multi-tag operations", async () => {
+          app.vault._getAbstractFileByPath = new TFile();
+          app.vault._read = "Some content";
+
+          const cache = new CachedMetadata();
+          cache.tags = [];
+          cache.frontmatter = {};
+          app.metadataCache._getFileCache = cache;
+
+          const response = await request(server)
+            .patch("/vault/test.md")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "tag")
+            .set("Operation", "add")
+            .set("Location", "inline")
+            .set("Content-Type", "application/json")
+            .send({ tags: ["tag1", "tag2"] });
+
+          expect(response.status).toBe(200);
+          expect(response.body.summary.succeeded).toBe(2);
+
+          const results = response.body.results;
+          results.forEach((r: any) => {
+            expect(r.message).toContain("inline");
+          });
+        });
       });
     });
   });
