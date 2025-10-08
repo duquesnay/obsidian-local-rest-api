@@ -335,22 +335,37 @@ export default class RequestHandler {
     req: express.Request,
     res: express.Response
   ): Promise<void> {
-    if (!path || path.endsWith("/")) {
+    // Normalize path: strip trailing slashes for file requests
+    // but preserve them for intentional directory requests
+    let normalizedPath = path;
+    if (path && path.endsWith("/")) {
+      // Check if the path without trailing slash refers to a file
+      const pathWithoutSlash = path.replace(/\/+$/, "");
+      if (pathWithoutSlash && await this.app.vault.adapter.exists(pathWithoutSlash)) {
+        const stat = await this.app.vault.adapter.stat(pathWithoutSlash);
+        if (stat.type === "file") {
+          // This is a file request with trailing slash - normalize it
+          normalizedPath = pathWithoutSlash;
+        }
+      }
+    }
+
+    if (!normalizedPath || normalizedPath.endsWith("/")) {
       // Check if directory exists
-      const dirExists = await this.app.vault.adapter.exists(path);
+      const dirExists = await this.app.vault.adapter.exists(normalizedPath);
       if (!dirExists) {
         this.returnCannedResponse(res, { statusCode: 404 });
         return;
       }
 
       // Use the adapter's list method to get both files and folders
-      const contents = await (this.app.vault.adapter as any).list(path);
+      const contents = await (this.app.vault.adapter as any).list(normalizedPath);
       const items: string[] = [];
 
       // Add files from the directory
       if (contents.files) {
         for (const file of contents.files) {
-          const relativePath = file.startsWith(path) ? file.slice(path.length) : file;
+          const relativePath = file.startsWith(normalizedPath) ? file.slice(normalizedPath.length) : file;
           items.push(relativePath);
         }
       }
@@ -358,7 +373,7 @@ export default class RequestHandler {
       // Add folders from the directory (with trailing slash)
       if (contents.folders) {
         for (const folder of contents.folders) {
-          const relativePath = folder.startsWith(path) ? folder.slice(path.length) : folder;
+          const relativePath = folder.startsWith(normalizedPath) ? folder.slice(normalizedPath.length) : folder;
           items.push(relativePath + "/");
         }
       }
@@ -369,22 +384,22 @@ export default class RequestHandler {
         files: items,
       });
     } else {
-      const exists = await this.app.vault.adapter.exists(path);
+      const exists = await this.app.vault.adapter.exists(normalizedPath);
 
-      if (exists && (await this.app.vault.adapter.stat(path)).type === "file") {
-        const content = await this.app.vault.adapter.readBinary(path);
-        const mimeType = mime.lookup(path);
+      if (exists && (await this.app.vault.adapter.stat(normalizedPath)).type === "file") {
+        const content = await this.app.vault.adapter.readBinary(normalizedPath);
+        const mimeType = mime.lookup(normalizedPath);
 
         res.set({
           "Content-Disposition": `attachment; filename="${encodeURI(
-            path
+            normalizedPath
           ).replace(",", "%2C")}"`,
           "Content-Type":
             `${mimeType}` +
             (mimeType == ContentTypes.markdown ? "; charset=utf-8" : ""),
         });
 
-        const file = this.app.vault.getAbstractFileByPath(path) as TFile;
+        const file = this.app.vault.getAbstractFileByPath(normalizedPath) as TFile;
         if (!file) {
           this.returnCannedResponse(res, { statusCode: 404 });
           return;
@@ -458,7 +473,7 @@ export default class RequestHandler {
           res.setHeader("Content-Type", ContentTypes.olrapiFrontmatterJson);
           res.send(JSON.stringify(frontmatter, null, 2));
           return;
-        } else if (path.endsWith(".md") && (desiredFormat === ContentTypes.plainText || desiredFormat === ContentTypes.html)) {
+        } else if (normalizedPath.endsWith(".md") && (desiredFormat === ContentTypes.plainText || desiredFormat === ContentTypes.html)) {
           // For markdown files, handle text/plain and text/html
           const fileContent = await this.app.vault.read(file);
           
