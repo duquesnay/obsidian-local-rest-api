@@ -2,6 +2,26 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project Team
+
+**Team structure and workflows**: See `planning/framing.md` (local, gitignored) for detailed team organization and collaboration patterns.
+
+**Core Team** (consult systematically):
+- **developer** - Implementation and testing
+- **solution-architect** - API design and architecture decisions
+- **integration-specialist** - API compatibility and contract validation
+- **performance-optimizer** - Performance profiling and optimization
+
+**Support Team** (on-demand):
+- code-quality-analyst, architecture-reviewer, refactoring-specialist
+- backlog-manager, documentation-writer, git-workflow-manager, project-framer
+
+**Key Patterns**:
+- New endpoints: solution-architect → integration-specialist → developer → (code-quality-analyst if complex)
+- Performance issues: performance-optimizer → developer → integration-specialist
+- Major refactoring: solution-architect → refactoring-specialist → developer → architecture-reviewer
+- Bug fixes: developer (TDD) → integration-specialist (if API-touching)
+
 ## Development Commands
 
 ### Build Commands
@@ -273,17 +293,17 @@ All directory operations have been implemented:
   - Fixed GET `/vault/{path}/` to include empty directories using adapter.list()
   - Updated OpenAPI documentation to reflect directories are now returned
   - Empty directories now show with trailing slash in listing response
-- [ ] Bookmark Management - HIGH PRIORITY
+- [ ] Bookmark Management
   - GET `/bookmarks/` - List all bookmarks with groups/folders
   - POST `/bookmarks/` - Create new bookmark or bookmark folder
   - PATCH `/bookmarks/{id}/` - Update bookmark title, URL, or folder
   - DELETE `/bookmarks/{id}/` - Remove bookmark or folder
   - Integration with Obsidian's bookmark system
-- [ ] Link Graph Operations - MEDIUM PRIORITY
+- [ ] Link Graph Operations
   - Backlinks and forward links
   - Broken link detection
   - Orphaned file detection
-- [ ] Batch Processing - LOW PRIORITY
+- [ ] Batch Processing
   - Atomic multi-operation execution
   - Transaction support with rollback
 
