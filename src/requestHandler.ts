@@ -706,6 +706,18 @@ export default class RequestHandler {
       return;
     }
 
+    // Check for tag operations (before file validation)
+    if (targetType === "tag") {
+      if (operation === "add" || operation === "remove") {
+        return this.handleTagOperation(path, req, res);
+      }
+      res.status(400).json({
+        errorCode: 40009,
+        message: "Only 'add' or 'remove' operations are supported for Target-Type: tag"
+      });
+      return;
+    }
+
     const file = this.app.vault.getAbstractFileByPath(path);
     if (!(file instanceof TFile)) {
       this.returnCannedResponse(res, {
@@ -752,19 +764,7 @@ export default class RequestHandler {
         return this.handleRenameOperation(path, req, res);
       }
     }
-    
-    // Check for tag operations
-    if (targetType === "tag") {
-      if (operation === "add" || operation === "remove") {
-        return this.handleTagOperation(path, req, res);
-      }
-      res.status(400).json({
-        errorCode: 40009,
-        message: "Only 'add' or 'remove' operations are supported for Target-Type: tag"
-      });
-      return;
-    }
-    
+
     // Validate that file-specific operations are only used with file target type
     if ((operation === "rename" || operation === "move") && !["file", "directory"].includes(targetType)) {
       res.status(400).json({
@@ -1557,14 +1557,12 @@ export default class RequestHandler {
     return { tag: trimmed, isValid: true };
   }
 
-  private async addSingleTag(file: TFile, tagName: string, location: string): Promise<void> {
-    let content = await this.app.vault.read(file);
-    const originalContent = content;
-
-    // Add tag to frontmatter if it exists, otherwise add as inline tag
+  /**
+   * Add tag to content string (in-memory operation, no file I/O)
+   */
+  private addTagToContent(content: string, tagName: string, location: string, cache: CachedMetadata | null): string {
     const frontmatterRegex = /^---\n([\s\S]*?)\n---/;
     const frontmatterMatch = content.match(frontmatterRegex);
-    const cache = this.app.metadataCache.getFileCache(file);
 
     if ((location === 'frontmatter' || location === 'both') && frontmatterMatch && cache?.frontmatter) {
       // Add to frontmatter tags
@@ -1594,17 +1592,13 @@ export default class RequestHandler {
       content += `\n#${tagName}`;
     }
 
-    // Write the file if it was modified
-    if (content !== originalContent) {
-      await this.app.vault.adapter.write(file.path, content);
-    }
+    return content;
   }
 
-  private async removeSingleTag(file: TFile, tagName: string, location: string): Promise<void> {
-    let content = await this.app.vault.read(file);
-    const originalContent = content;
-    const cache = this.app.metadataCache.getFileCache(file);
-
+  /**
+   * Remove tag from content string (in-memory operation, no file I/O)
+   */
+  private removeTagFromContent(content: string, tagName: string, location: string, cache: CachedMetadata | null): string {
     // Remove inline tags
     if ((location === 'inline' || location === 'both') && cache?.tags) {
       for (const tag of cache.tags) {
@@ -1649,6 +1643,29 @@ export default class RequestHandler {
 
     // Clean up extra whitespace
     content = content.replace(/\n\s*\n\s*\n/g, '\n\n');
+
+    return content;
+  }
+
+  private async addSingleTag(file: TFile, tagName: string, location: string): Promise<void> {
+    let content = await this.app.vault.read(file);
+    const originalContent = content;
+    const cache = this.app.metadataCache.getFileCache(file);
+
+    content = this.addTagToContent(content, tagName, location, cache);
+
+    // Write the file if it was modified
+    if (content !== originalContent) {
+      await this.app.vault.adapter.write(file.path, content);
+    }
+  }
+
+  private async removeSingleTag(file: TFile, tagName: string, location: string): Promise<void> {
+    let content = await this.app.vault.read(file);
+    const originalContent = content;
+    const cache = this.app.metadataCache.getFileCache(file);
+
+    content = this.removeTagFromContent(content, tagName, location, cache);
 
     // Write the file if it was modified
     if (content !== originalContent) {
@@ -1696,7 +1713,9 @@ export default class RequestHandler {
       failed++;
     }
 
-    // Get current file tags (read once)
+    // Read file content ONCE (performance optimization)
+    let content = await this.app.vault.read(file);
+    const originalContent = content;
     const cache = this.app.metadataCache.getFileCache(file);
     const existingTags = new Set<string>();
 
@@ -1712,7 +1731,7 @@ export default class RequestHandler {
       cache.tags.forEach(t => existingTags.add(t.tag.replace(/^#/, '')));
     }
 
-    // Process each valid tag
+    // Process each valid tag IN-MEMORY (no I/O in loop)
     for (const validation of validTags) {
       const normalizedTag = validation.tag.replace(/^#/, '');
 
@@ -1728,8 +1747,8 @@ export default class RequestHandler {
             continue;
           }
 
-          // Use existing single-tag logic
-          await this.addSingleTag(file, normalizedTag, location);
+          // Apply tag modification in-memory
+          content = this.addTagToContent(content, normalizedTag, location, cache);
           existingTags.add(normalizedTag);
 
           results.push({
@@ -1750,8 +1769,8 @@ export default class RequestHandler {
             continue;
           }
 
-          // Use existing single-tag logic
-          await this.removeSingleTag(file, normalizedTag, location);
+          // Apply tag modification in-memory
+          content = this.removeTagFromContent(content, normalizedTag, location, cache);
           existingTags.delete(normalizedTag);
 
           results.push({
@@ -1770,6 +1789,11 @@ export default class RequestHandler {
         });
         failed++;
       }
+    }
+
+    // Write file ONCE if modified (performance optimization)
+    if (content !== originalContent) {
+      await this.app.vault.adapter.write(file.path, content);
     }
 
     return {

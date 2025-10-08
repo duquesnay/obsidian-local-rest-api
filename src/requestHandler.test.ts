@@ -2066,6 +2066,181 @@ describe("requestHandler", () => {
     });
 
     describe("Multi-tag operations", () => {
+      describe("Unit Tests", () => {
+        describe("validateTagName()", () => {
+          test("accepts valid tag names", () => {
+            const validNames = [
+              'simple-tag',
+              'tag_with_underscore',
+              'nested/tag',
+              'tag123',
+              'a',  // minimum length
+              'a'.repeat(100),  // maximum length
+            ];
+
+            for (const name of validNames) {
+              const result = handler['validateTagName'](name);
+              expect(result.isValid).toBe(true);
+              expect(result.tag).toBe(name);
+              expect(result.error).toBeUndefined();
+            }
+          });
+
+          test("rejects empty tag names", () => {
+            const result1 = handler['validateTagName']('');
+            expect(result1.isValid).toBe(false);
+            expect(result1.error).toContain('empty');
+
+            const result2 = handler['validateTagName']('   ');
+            expect(result2.isValid).toBe(false);
+            expect(result2.error).toContain('empty');
+          });
+
+          test("rejects tag names with invalid characters", () => {
+            const invalidNames = [
+              'tag with spaces',
+              'tag!exclamation',
+              'tag@at',
+              'tag#hash',
+              'tag$dollar',
+              'tag%percent',
+              'tag&ampersand',
+              'tag*asterisk',
+              'tag(paren)',
+              'tag[bracket]',
+            ];
+
+            for (const name of invalidNames) {
+              const result = handler['validateTagName'](name);
+              expect(result.isValid).toBe(false);
+              expect(result.error).toContain('Invalid tag name format');
+            }
+          });
+
+          test("rejects tag names that are too long", () => {
+            const tooLong = 'a'.repeat(101);
+
+            const result = handler['validateTagName'](tooLong);
+            expect(result.isValid).toBe(false);
+            expect(result.error).toContain('too long');
+          });
+
+          test("rejects tag names with # character", () => {
+            const result = handler['validateTagName']('#mytag');
+            expect(result.isValid).toBe(false);
+            expect(result.error).toContain('Invalid tag name format');
+          });
+
+          test("handles edge cases", () => {
+            // Only hyphens and underscores
+            const result1 = handler['validateTagName']('---___');
+            expect(result1.isValid).toBe(true);
+
+            // Only numbers
+            const result2 = handler['validateTagName']('12345');
+            expect(result2.isValid).toBe(true);
+
+            // Nested path
+            const result3 = handler['validateTagName']('parent/child/grandchild');
+            expect(result3.isValid).toBe(true);
+          });
+        });
+
+        describe("addTagToContent()", () => {
+          test("adds tag to frontmatter when it exists", () => {
+            const content = `---
+title: Test
+tags: ["existing"]
+---
+
+Content here`;
+
+            const cache = new CachedMetadata();
+            cache.frontmatter = { tags: ['existing'] };
+
+            const result = handler['addTagToContent'](content, 'newtag', 'frontmatter', cache);
+
+            expect(result).toContain('tags: ["existing", "newtag"]');
+            expect(result).toContain('Content here');
+          });
+
+          test("adds tag as inline when no frontmatter", () => {
+            const content = "Just some content";
+
+            const result = handler['addTagToContent'](content, 'mytag', 'inline', null);
+
+            expect(result).toContain('#mytag');
+            expect(result).toContain('Just some content');
+          });
+
+          test("creates frontmatter tags field if missing", () => {
+            const content = `---
+title: Test
+---
+
+Content here`;
+
+            const cache = new CachedMetadata();
+            cache.frontmatter = { title: 'Test' };
+
+            const result = handler['addTagToContent'](content, 'newtag', 'frontmatter', cache);
+
+            expect(result).toContain('tags: ["newtag"]');
+          });
+        });
+
+        describe("removeTagFromContent()", () => {
+          test("removes tag from frontmatter", () => {
+            const content = `---
+title: Test
+tags: ["tag1", "tag2", "tag3"]
+---
+
+Content here`;
+
+            const cache = new CachedMetadata();
+            cache.frontmatter = { tags: ['tag1', 'tag2', 'tag3'] };
+
+            const result = handler['removeTagFromContent'](content, 'tag2', 'frontmatter', cache);
+
+            expect(result).toContain('tags: ["tag1", "tag3"]');
+            expect(result).not.toContain('tag2');
+          });
+
+          test("removes inline tags", () => {
+            const content = "Content with #tag1 and #tag2 tags";
+
+            const cache = new CachedMetadata();
+            cache.tags = [
+              { tag: '#tag1' },
+              { tag: '#tag2' }
+            ];
+
+            const result = handler['removeTagFromContent'](content, 'tag1', 'inline', cache);
+
+            expect(result).not.toContain('#tag1');
+            expect(result).toContain('#tag2');
+          });
+
+          test("removes tags field entirely when empty", () => {
+            const content = `---
+title: Test
+tags: ["onlytag"]
+---
+
+Content here`;
+
+            const cache = new CachedMetadata();
+            cache.frontmatter = { tags: ['onlytag'] };
+
+            const result = handler['removeTagFromContent'](content, 'onlytag', 'frontmatter', cache);
+
+            expect(result).not.toContain('tags:');
+            expect(result).toContain('title: Test');
+          });
+        });
+      });
+
       describe("Request parsing", () => {
         test("parses single tag from header (backward compat)", async () => {
           app.vault._getAbstractFileByPath = new TFile();
