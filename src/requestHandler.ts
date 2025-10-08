@@ -1764,8 +1764,6 @@ export default class RequestHandler {
             continue;
           }
 
-          // Use existing single-tag logic
-          await this.addSingleTag(file, normalizedTag, location);
           // Apply tag modification in-memory
           content = this.addTagToContent(content, normalizedTag, location, cache);
           existingTags.add(normalizedTag);
@@ -1788,8 +1786,6 @@ export default class RequestHandler {
             continue;
           }
 
-          // Use existing single-tag logic
-          await this.removeSingleTag(file, normalizedTag, location);
           // Apply tag modification in-memory
           content = this.removeTagFromContent(content, normalizedTag, location, cache);
           existingTags.delete(normalizedTag);
