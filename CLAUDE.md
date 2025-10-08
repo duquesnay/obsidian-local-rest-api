@@ -22,6 +22,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Major refactoring: solution-architect → refactoring-specialist → developer → architecture-reviewer
 - Bug fixes: developer (TDD) → integration-specialist (if API-touching)
 
+## Architecture Documentation
+
+For detailed architecture analysis and refactoring plans, see:
+- **[Architecture Roadmap](docs/architecture/ROADMAP.md)** - Executive summary and 5-phase refactoring plan
+- **[Tags & Bookmarks Review](docs/architecture/001-tags-bookmarks-review.md)** - Comprehensive code quality and SOLID analysis
+- **[Performance Analysis](docs/architecture/003-performance-analysis.md)** - N+1 I/O bug analysis and optimization guide
+
+The God Object pattern (RequestHandler: 3,339 lines) is documented for future refactoring after reviewing architecture improvements in the original project.
+
 ## Development Commands
 
 ### Build Commands

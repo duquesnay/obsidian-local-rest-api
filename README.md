@@ -74,10 +74,15 @@ curl -X PATCH https://localhost:27124/vault/my-note.md \
   -d "New content to insert"
 ```
 
-## API Documentation
+## Documentation
 
-### Interactive API Docs
+### API Documentation
 Visit https://coddingtonbear.github.io/obsidian-local-rest-api/ for interactive Swagger documentation.
+
+### Architecture & Development
+- [Architecture Review & Roadmap](docs/architecture/ROADMAP.md) - Refactoring plan and architecture analysis
+- [Development Guidelines](CLAUDE.md) - Development practices and project learnings
+- [MCP Integration](MCP_INTEGRATION.md) - Model Context Protocol integration guide
 
 ### Key Endpoints
 
