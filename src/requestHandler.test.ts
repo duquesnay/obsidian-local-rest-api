@@ -2544,6 +2544,158 @@ Content here`;
         });
       });
 
+      describe("YAML Format Support (Integration Tests)", () => {
+        test("adds tags to YAML list format frontmatter", async () => {
+          const file = new TFile();
+          file.path = "test.md";
+          app.vault._getAbstractFileByPath = file;
+
+          // File with YAML list format
+          const yamlContent = `---
+title: Test
+tags:
+  - existing1
+  - existing2
+---
+
+Content here`;
+          app.vault._read = yamlContent;
+
+          const cache = new CachedMetadata();
+          cache.frontmatter = { title: 'Test', tags: ['existing1', 'existing2'] };
+          app.metadataCache._getFileCache = cache;
+
+          // Mock processFrontMatter to actually modify tags
+          let capturedFrontmatter: any = null;
+          app.fileManager.processFrontMatter = async (file: TFile, fn: (fm: any) => void) => {
+            const frontmatter = { title: 'Test', tags: ['existing1', 'existing2'] };
+            await fn(frontmatter);
+            capturedFrontmatter = frontmatter;
+          };
+
+          const response = await request(server)
+            .patch("/vault/test.md")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "tag")
+            .set("Operation", "add")
+            .set("Location", "frontmatter")
+            .set("Content-Type", "application/json")
+            .send({ tags: ["newtag1", "newtag2"] });
+
+          expect(response.status).toBe(200);
+          expect(response.body.summary.succeeded).toBe(2);
+          expect(capturedFrontmatter.tags).toContain('newtag1');
+          expect(capturedFrontmatter.tags).toContain('newtag2');
+          expect(capturedFrontmatter.tags).toHaveLength(4);
+        });
+
+        test("removes tags from YAML list format frontmatter", async () => {
+          const file = new TFile();
+          file.path = "test.md";
+          app.vault._getAbstractFileByPath = file;
+
+          const yamlContent = `---
+tags:
+  - tag1
+  - tag2
+  - tag3
+---`;
+          app.vault._read = yamlContent;
+
+          const cache = new CachedMetadata();
+          cache.frontmatter = { tags: ['tag1', 'tag2', 'tag3'] };
+          app.metadataCache._getFileCache = cache;
+
+          let capturedFrontmatter: any = null;
+          app.fileManager.processFrontMatter = async (file: TFile, fn: (fm: any) => void) => {
+            const frontmatter = { tags: ['tag1', 'tag2', 'tag3'] };
+            await fn(frontmatter);
+            capturedFrontmatter = frontmatter;
+          };
+
+          const response = await request(server)
+            .patch("/vault/test.md")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "tag")
+            .set("Operation", "remove")
+            .set("Location", "frontmatter")
+            .set("Content-Type", "application/json")
+            .send({ tags: ["tag2"] });
+
+          expect(response.status).toBe(200);
+          expect(response.body.summary.succeeded).toBe(1);
+          expect(capturedFrontmatter.tags).not.toContain('tag2');
+          expect(capturedFrontmatter.tags).toHaveLength(2);
+        });
+
+        test("handles malformed YAML with proper error", async () => {
+          const file = new TFile();
+          file.path = "broken.md";
+          app.vault._getAbstractFileByPath = file;
+
+          app.vault._read = "---\ntags: [unclosed\n---";
+
+          const cache = new CachedMetadata();
+          cache.frontmatter = {}; // Obsidian would fail to parse this
+          app.metadataCache._getFileCache = cache;
+
+          // Mock processFrontMatter to throw YAML error
+          app.fileManager.processFrontMatter = async () => {
+            throw new Error('YAML parsing error: unclosed bracket');
+          };
+
+          const response = await request(server)
+            .patch("/vault/broken.md")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "tag")
+            .set("Operation", "add")
+            .set("Location", "frontmatter")
+            .set("Content-Type", "application/json")
+            .send({ tags: ["newtag"] });
+
+          expect(response.status).toBe(400);
+          expect(response.body.summary.failed).toBe(1);
+          expect(response.body.results[0].message).toContain('Frontmatter operation failed');
+          expect(response.body.results[0].message).toContain('YAML parsing error');
+        });
+
+        test("inline array format still works (regression test)", async () => {
+          const file = new TFile();
+          file.path = "test.md";
+          app.vault._getAbstractFileByPath = file;
+
+          // File with inline array format
+          const inlineContent = `---
+title: Test
+tags: ["existing"]
+---`;
+          app.vault._read = inlineContent;
+
+          const cache = new CachedMetadata();
+          cache.frontmatter = { title: 'Test', tags: ['existing'] };
+          app.metadataCache._getFileCache = cache;
+
+          let capturedFrontmatter: any = null;
+          app.fileManager.processFrontMatter = async (file: TFile, fn: (fm: any) => void) => {
+            const frontmatter = { title: 'Test', tags: ['existing'] };
+            await fn(frontmatter);
+            capturedFrontmatter = frontmatter;
+          };
+
+          const response = await request(server)
+            .patch("/vault/test.md")
+            .set("Authorization", `Bearer ${API_KEY}`)
+            .set("Target-Type", "tag")
+            .set("Operation", "add")
+            .set("Location", "frontmatter")
+            .set("Target", "newtag");
+
+          expect(response.status).toBe(200);
+          expect(capturedFrontmatter.tags).toContain('newtag');
+          expect(capturedFrontmatter.tags).toContain('existing');
+        });
+      });
+
       describe("Mixed success/failure scenarios", () => {
         test("partial success returns 200 with results", async () => {
           app.vault._getAbstractFileByPath = new TFile();
